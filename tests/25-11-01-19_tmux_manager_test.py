@@ -44,6 +44,7 @@ class DummyServer:
     def __init__(self):
         self.sessions = []
         self.new_session_args = []
+        self.kill_session_args = []
 
     def find_where(self, attrs):
         for session in self.sessions:
@@ -56,6 +57,10 @@ class DummyServer:
         self.sessions.append(session)
         self.new_session_args.append((session_name, attach))
         return session
+
+    def kill_session(self, session_name):
+        self.kill_session_args.append(session_name)
+        self.sessions = [s for s in self.sessions if s.session_name != session_name]
 
 
 @pytest.fixture
@@ -116,3 +121,22 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     assert any("codex resume session-worker-1" in cmd for cmd, _ in worker_pane.sent)
     assert worker_pane.sent[-1] == ("echo worker", True)
     assert main_pane.sent[-1] == ("codex resume session-worker-1", True)
+
+
+def test_tmux_layout_manager_recreates_existing_session(monkeypatch_server):
+    monitor = Mock()
+    manager = TmuxLayoutManager(
+        session_name="parallel-dev",
+        worker_count=1,
+        monitor=monitor,
+        root_path=Path("/repo"),
+    )
+
+    # Simulate pre-existing session
+    existing = DummySession("parallel-dev")
+    monkeypatch_server.sessions.append(existing)
+
+    manager.ensure_layout(session_name="parallel-dev", worker_count=1)
+
+    assert "parallel-dev" in monkeypatch_server.kill_session_args
+    assert monkeypatch_server.new_session_args.count(("parallel-dev", False)) == 1

@@ -40,7 +40,7 @@ class TmuxLayoutManager:
         if session_name != self.session_name or worker_count != self.worker_count:
             raise ValueError("session_name/worker_count mismatch with manager configuration")
 
-        session = self._get_or_create_session()
+        session = self._get_or_create_session(fresh=True)
         window = getattr(session, "attached_window", None) or session.windows[0]
 
         target_pane_count = self.worker_count + 2  # main + boss + workers
@@ -110,8 +110,14 @@ class TmuxLayoutManager:
         pane = self._get_pane(pane_id)
         pane.cmd("send-keys", "-t", pane_id, "Escape")
 
-    def _get_or_create_session(self):
+    def _get_or_create_session(self, fresh: bool = False):
         session = self._server.find_where({"session_name": self.session_name})
+        if session is not None and fresh:
+            try:
+                self._server.kill_session(session_name=self.session_name)
+            except Exception:
+                pass
+            session = None
         if session is None:
             session = self._server.new_session(session_name=self.session_name, attach=False)
         return session
