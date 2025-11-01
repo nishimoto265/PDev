@@ -22,7 +22,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
 
     monkeypatch.setattr(
         "parallel_developer.cli.TmuxLayoutManager",
-        lambda session_name, worker_count, monitor: tmux,
+        lambda session_name, worker_count, monitor, root_path, startup_delay=0.0: tmux,
     )
     monkeypatch.setattr(
         "parallel_developer.cli.WorktreeManager", lambda **_: worktree

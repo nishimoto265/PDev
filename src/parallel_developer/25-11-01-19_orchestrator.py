@@ -39,16 +39,26 @@ class Orchestrator:
     def run_cycle(self, instruction: str) -> OrchestrationResult:
         """Execute a single orchestrated instruction cycle."""
 
-        self._worktree.prepare()
+        worker_roots = list(self._worktree.prepare().values())
 
         layout = self._ensure_layout()
         main_pane = layout["main"]
+        boss_pane = layout["boss"]
         worker_panes = layout["workers"]
+
+        pane_to_worker_path = {}
+        for idx, pane_id in enumerate(worker_panes):
+            path = worker_roots[idx] if idx < len(worker_roots) else self._worktree.root
+            pane_to_worker_path[pane_id] = path
+
+        self._tmux.launch_main_session(pane_id=main_pane)
+        self._tmux.launch_boss_session(pane_id=boss_pane)
 
         self._tmux.send_instruction_to_pane(
             pane_id=main_pane,
             instruction=instruction,
         )
+        self._tmux.interrupt_pane(pane_id=main_pane)
 
         main_session_id = self._monitor.capture_instruction(
             pane_id=main_pane,
@@ -60,6 +70,7 @@ class Orchestrator:
             base_session_id=main_session_id,
         )
 
+        self._tmux.resume_workers(fork_map, pane_to_worker_path)
         self._tmux.send_instruction_to_workers(fork_map, instruction)
 
         completion_info = self._monitor.await_completion(

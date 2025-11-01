@@ -1,0 +1,12 @@
+.venv/
+.venv
+.parallel-dev/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+25-11-01-18_codex_src/
+uv.lock
+*uv.lock
+*.jsonl

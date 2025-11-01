@@ -1,5 +1,7 @@
-import pytest
+from pathlib import Path
 from unittest.mock import Mock
+
+import pytest
 
 from parallel_developer.orchestrator import Orchestrator, OrchestrationResult
 
@@ -8,11 +10,16 @@ from parallel_developer.orchestrator import Orchestrator, OrchestrationResult
 def dependencies():
     tmux = Mock(name="tmux_manager")
     worktree = Mock(name="worktree_manager")
+    worktree.root = Path("/repo")
     monitor = Mock(name="monitor")
     boss = Mock(name="boss_manager")
     logger = Mock(name="log_manager")
 
-    worktree.prepare.return_value = {"worker-1": "path"}
+    worktree.prepare.return_value = {
+        "worker-1": Path("/repo/.parallel-dev/worktrees/worker-1"),
+        "worker-2": Path("/repo/.parallel-dev/worktrees/worker-2"),
+        "worker-3": Path("/repo/.parallel-dev/worktrees/worker-3"),
+    }
 
     layout = {
         "main": "pane-main",
@@ -71,30 +78,39 @@ def test_orchestrator_runs_happy_path(dependencies):
     result = orchestrator.run_cycle(dependencies["instruction"])
 
     dependencies["worktree"].prepare.assert_called_once()
-    dependencies["tmux"].ensure_layout.assert_called_once_with(
+    tmux = dependencies["tmux"]
+    monitor = dependencies["monitor"]
+    worktree = dependencies["worktree"]
+
+    worktree.prepare.assert_called_once()
+    tmux.ensure_layout.assert_called_once_with(
         session_name="parallel-dev",
         worker_count=3,
     )
-    dependencies["tmux"].send_instruction_to_pane.assert_called_once_with(
+    tmux.launch_main_session.assert_called_once_with(pane_id="pane-main")
+    tmux.launch_boss_session.assert_called_once_with(pane_id="pane-boss")
+    tmux.send_instruction_to_pane.assert_called_once_with(
         pane_id="pane-main",
         instruction=dependencies["instruction"],
     )
-    dependencies["monitor"].capture_instruction.assert_called_once_with(
+    tmux.interrupt_pane.assert_called_once_with(pane_id="pane-main")
+    monitor.capture_instruction.assert_called_once_with(
         pane_id="pane-main",
         instruction=dependencies["instruction"],
     )
-    dependencies["tmux"].fork_workers.assert_called_once_with(
+    tmux.fork_workers.assert_called_once_with(
         workers=["pane-worker-1", "pane-worker-2", "pane-worker-3"],
         base_session_id="session-main",
     )
-    dependencies["tmux"].send_instruction_to_workers.assert_called_once_with(
+    tmux.resume_workers.assert_called_once()
+    tmux.send_instruction_to_workers.assert_called_once_with(
         dependencies["fork_map"], dependencies["instruction"]
     )
-    dependencies["monitor"].await_completion.assert_called_once_with(
+    monitor.await_completion.assert_called_once_with(
         session_ids=list(dependencies["fork_map"].values())
     )
     dependencies["boss"].select_best.assert_called_once()
-    dependencies["tmux"].promote_to_main.assert_called_once_with(
+    tmux.promote_to_main.assert_called_once_with(
         session_id="session-worker-2",
         pane_id="pane-main",
     )

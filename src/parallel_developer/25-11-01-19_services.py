@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import time
 from datetime import datetime
@@ -18,10 +19,21 @@ from .orchestrator import OrchestrationResult
 class TmuxLayoutManager:
     """Manage tmux session layout for parallel Codex agents."""
 
-    def __init__(self, session_name: str, worker_count: int, monitor: "CodexMonitor") -> None:
+    def __init__(
+        self,
+        session_name: str,
+        worker_count: int,
+        monitor: "CodexMonitor",
+        *,
+        root_path: Path,
+        startup_delay: float = 0.0,
+    ) -> None:
         self.session_name = session_name
         self.worker_count = worker_count
         self.monitor = monitor
+        self.root_path = Path(root_path)
+        self.boss_path = self.root_path
+        self.startup_delay = startup_delay
         self._server = libtmux.Server()
 
     def ensure_layout(self, *, session_name: str, worker_count: int) -> Dict[str, Any]:
@@ -44,6 +56,22 @@ class TmuxLayoutManager:
         }
         return layout
 
+    def launch_main_session(self, *, pane_id: str) -> None:
+        command = (
+            f"cd {shlex.quote(str(self.root_path))} && "
+            f"codex --cd {shlex.quote(str(self.root_path))}"
+        )
+        self._send_command(pane_id, command)
+        self._maybe_wait()
+
+    def launch_boss_session(self, *, pane_id: str) -> None:
+        command = (
+            f"cd {shlex.quote(str(self.boss_path))} && "
+            f"codex --cd {shlex.quote(str(self.boss_path))}"
+        )
+        self._send_command(pane_id, command)
+        self._maybe_wait()
+
     def fork_workers(self, *, workers: Iterable[str], base_session_id: str) -> Dict[str, str]:
         worker_list = list(workers)
         for pane_id in worker_list:
@@ -54,6 +82,16 @@ class TmuxLayoutManager:
             worker_panes=worker_list,
             base_session_id=base_session_id,
         )
+
+    def resume_workers(self, fork_map: Mapping[str, str], pane_paths: Mapping[str, Path]) -> None:
+        for pane_id, session_id in fork_map.items():
+            worker_path = pane_paths.get(pane_id, self.root_path)
+            command = (
+                f"cd {shlex.quote(str(worker_path))} && "
+                f"codex resume {shlex.quote(session_id)}"
+            )
+            self._send_command(pane_id, command)
+        self._maybe_wait()
 
     def send_instruction_to_pane(self, *, pane_id: str, instruction: str) -> None:
         pane = self._get_pane(pane_id)
@@ -68,6 +106,10 @@ class TmuxLayoutManager:
         pane = self._get_pane(pane_id)
         pane.send_keys(f"codex resume {session_id}", enter=True)
 
+    def interrupt_pane(self, *, pane_id: str) -> None:
+        pane = self._get_pane(pane_id)
+        pane.cmd("send-keys", "-t", pane_id, "Escape")
+
     def _get_or_create_session(self):
         session = self._server.find_where({"session_name": self.session_name})
         if session is None:
@@ -81,6 +123,14 @@ class TmuxLayoutManager:
                     if pane.pane_id == pane_id:
                         return pane
         raise RuntimeError(f"Pane {pane_id!r} not found in tmux session {self.session_name}")
+
+    def _send_command(self, pane_id: str, command: str) -> None:
+        pane = self._get_pane(pane_id)
+        pane.send_keys(command, enter=True)
+
+    def _maybe_wait(self) -> None:
+        if self.startup_delay > 0:
+            time.sleep(self.startup_delay)
 
 
 class WorktreeManager:

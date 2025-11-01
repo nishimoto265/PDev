@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -71,18 +72,25 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
         "%3": "session-worker-2",
     }
 
-    manager = TmuxLayoutManager(session_name="parallel-dev", worker_count=2, monitor=monitor)
+    manager = TmuxLayoutManager(
+        session_name="parallel-dev",
+        worker_count=2,
+        monitor=monitor,
+        root_path=Path("/repo"),
+    )
 
     layout = manager.ensure_layout(session_name="parallel-dev", worker_count=2)
     assert layout["main"] == "%0"
     assert layout["boss"] == "%1"
     assert layout["workers"] == ["%2", "%3"]
 
+    manager.launch_main_session(pane_id=layout["main"])
+    manager.launch_boss_session(pane_id=layout["boss"])
     manager.send_instruction_to_pane(pane_id=layout["main"], instruction="echo main")
-    manager.send_instruction_to_workers(
-        fork_map={layout["workers"][0]: "session-worker-1"},
-        instruction="echo worker",
-    )
+    manager.interrupt_pane(pane_id=layout["main"])
+
+    initial_map = {layout["workers"][0]: "session-worker-1"}
+    manager.send_instruction_to_workers(fork_map=initial_map, instruction="echo worker")
 
     fork_map = manager.fork_workers(workers=layout["workers"], base_session_id="session-main")
     assert fork_map == {
@@ -91,11 +99,20 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     }
     monitor.await_new_sessions.assert_called_once()
 
+    worker_paths = {
+        layout["workers"][0]: Path("/repo/.parallel-dev/worktrees/worker-1"),
+        layout["workers"][1]: Path("/repo/.parallel-dev/worktrees/worker-2"),
+    }
+    manager.resume_workers(fork_map, worker_paths)
+    manager.send_instruction_to_workers(fork_map, "echo worker")
     manager.promote_to_main(session_id="session-worker-1", pane_id=layout["main"])
 
     main_pane = monkeypatch_server.sessions[0].windows[0].panes[0]
-    assert main_pane.sent[0] == ("echo main", True)
+    assert "codex --cd /repo" in main_pane.sent[0][0]
+    assert main_pane.sent[1] == ("echo main", True)
+    assert ("send-keys", "-t", layout["main"], "Escape") in main_pane.cmd_calls
     worker_pane = monkeypatch_server.sessions[0].windows[0].panes[2]
     assert ("send-keys", "-t", layout["workers"][0], "Escape") in worker_pane.cmd_calls
-    assert worker_pane.sent[0] == ("echo worker", True)
+    assert any("codex resume session-worker-1" in cmd for cmd, _ in worker_pane.sent)
+    assert worker_pane.sent[-1] == ("echo worker", True)
     assert main_pane.sent[-1] == ("codex resume session-worker-1", True)

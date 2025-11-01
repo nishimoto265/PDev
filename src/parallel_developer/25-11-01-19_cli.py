@@ -67,6 +67,7 @@ def build_orchestrator(worker_count: int, log_dir: Optional[Path]) -> Orchestrat
         session_name=session_name,
         worker_count=worker_count,
         monitor=monitor,
+        root_path=Path.cwd(),
     )
     worktree_manager = WorktreeManager(root=Path.cwd(), worker_count=worker_count)
     boss_manager = BossManager()
