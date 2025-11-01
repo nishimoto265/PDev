@@ -138,6 +138,7 @@ class TmuxLayoutManager:
         pane = self._get_pane(pane_id)
         pane.cmd("send-keys", "-t", pane_id, "-l", text)
         pane.cmd("send-keys", "-t", pane_id, "Enter")
+        pane.cmd("send-keys", "-t", pane_id, "Enter")
 
 
 class WorktreeManager:
