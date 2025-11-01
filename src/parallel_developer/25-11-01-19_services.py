@@ -112,14 +112,15 @@ class TmuxLayoutManager:
 
     def _get_or_create_session(self, fresh: bool = False):
         session = self._server.find_where({"session_name": self.session_name})
-        if session is not None and fresh:
-            try:
-                self._server.kill_session(session_name=self.session_name)
-            except Exception:
-                pass
-            session = None
-        if session is None:
-            session = self._server.new_session(session_name=self.session_name, attach=False)
+        if session is not None and not fresh:
+            return session
+
+        kill_existing = fresh and session is not None
+        session = self._server.new_session(
+            session_name=self.session_name,
+            attach=False,
+            kill_session=kill_existing,
+        )
         return session
 
     def _get_pane(self, pane_id: str):

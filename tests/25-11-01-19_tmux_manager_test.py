@@ -44,7 +44,6 @@ class DummyServer:
     def __init__(self):
         self.sessions = []
         self.new_session_args = []
-        self.kill_session_args = []
 
     def find_where(self, attrs):
         for session in self.sessions:
@@ -52,15 +51,13 @@ class DummyServer:
                 return session
         return None
 
-    def new_session(self, session_name, attach):
+    def new_session(self, session_name, attach, kill_session=False):
+        if kill_session:
+            self.sessions = [s for s in self.sessions if s.session_name != session_name]
         session = DummySession(session_name)
         self.sessions.append(session)
-        self.new_session_args.append((session_name, attach))
+        self.new_session_args.append((session_name, attach, kill_session))
         return session
-
-    def kill_session(self, session_name):
-        self.kill_session_args.append(session_name)
-        self.sessions = [s for s in self.sessions if s.session_name != session_name]
 
 
 @pytest.fixture
@@ -138,5 +135,5 @@ def test_tmux_layout_manager_recreates_existing_session(monkeypatch_server):
 
     manager.ensure_layout(session_name="parallel-dev", worker_count=1)
 
-    assert "parallel-dev" in monkeypatch_server.kill_session_args
-    assert monkeypatch_server.new_session_args.count(("parallel-dev", False)) == 1
+    entries = [args for args in monkeypatch_server.new_session_args if args[0] == "parallel-dev"]
+    assert entries[0] == ("parallel-dev", False, True)
