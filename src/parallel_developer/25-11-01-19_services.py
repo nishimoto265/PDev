@@ -158,7 +158,11 @@ class CodexMonitor:
         data = self._load_map()
         pane_entry = data.get("panes", {}).get(pane_id)
         if pane_entry is None:
-            raise RuntimeError(f"Pane {pane_id!r} is not registered in session_map")
+            session_id = self._generate_session_id(pane_id)
+            rollout_path = self.logs_dir / "sessions" / f"{session_id}.jsonl"
+            rollout_path.touch(exist_ok=True)
+            self.register_session(pane_id=pane_id, session_id=session_id, rollout_path=rollout_path)
+            pane_entry = {"session_id": session_id}
 
         instruction_log = self.logs_dir / "instruction.log"
         with instruction_log.open("a", encoding="utf-8") as fh:
@@ -235,6 +239,10 @@ class CodexMonitor:
             time.sleep(self.poll_interval)
 
         return discovered
+
+    def _generate_session_id(self, pane_id: str) -> str:
+        suffix = int(time.time() * 1000)
+        return f"auto-{pane_id.strip('%')}-{suffix}"
 
     def _load_map(self) -> Dict[str, Any]:
         text = self.session_map_path.read_text(encoding="utf-8")
