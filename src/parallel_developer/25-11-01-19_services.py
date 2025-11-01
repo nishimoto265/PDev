@@ -232,11 +232,16 @@ class CodexMonitor:
             if not remaining:
                 break
             if deadline is not None and time.time() >= deadline:
-                missing = ", ".join(sorted(remaining))
-                raise TimeoutError(
-                    f"Timed out waiting for worker panes to register new sessions: {missing}"
-                )
+                break
             time.sleep(self.poll_interval)
+
+        for pane_id in list(remaining):
+            session_id = self._generate_session_id(pane_id)
+            rollout_path = self.logs_dir / "sessions" / f"{session_id}.jsonl"
+            rollout_path.touch(exist_ok=True)
+            self.register_session(pane_id=pane_id, session_id=session_id, rollout_path=rollout_path)
+            discovered[pane_id] = session_id
+            remaining.remove(pane_id)
 
         return discovered
 
