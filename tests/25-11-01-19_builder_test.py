@@ -31,7 +31,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
         "parallel_developer.cli.CodexMonitor",
         lambda logs_dir, session_map_path, poll_interval=1.0: monitor,
     )
-    monkeypatch.setattr("parallel_developer.cli.BossManager", lambda **_: boss)
+    monkeypatch.setattr("parallel_developer.cli.BossManager", lambda repo_path: boss)
     monkeypatch.setattr("parallel_developer.cli.LogManager", lambda **_: log_manager)
     monkeypatch.setattr(
         "parallel_developer.cli.Orchestrator",

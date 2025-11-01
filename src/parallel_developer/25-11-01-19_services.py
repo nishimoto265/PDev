@@ -357,8 +357,8 @@ class CodexMonitor:
 class BossManager:
     """Score worker sessions and compile scoreboard information."""
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, repo_path: Path) -> None:
+        self._repo = git.Repo(repo_path)
 
     def finalize_scores(
         self,
@@ -366,25 +366,107 @@ class BossManager:
         decision: SelectionDecision,
         completion: Mapping[str, Any],
     ) -> Dict[str, Dict[str, Any]]:
+        return self._build_summary(candidates, decision.scores, decision.comments, completion)
+
+    def auto_select(
+        self,
+        candidates: List[CandidateInfo],
+        completion: Mapping[str, Any],
+    ) -> tuple[SelectionDecision, Dict[str, Dict[str, Any]]]:
+        scores: Dict[str, float] = {}
+        comments: Dict[str, str] = {}
+
+        for candidate in candidates:
+            score, comment = self._auto_score_candidate(candidate, completion)
+            scores[candidate.key] = score
+            if comment:
+                comments[candidate.key] = comment
+
+        best_key = max(scores, key=scores.get)
+        summary = self._build_summary(candidates, scores, comments, completion)
+        decision = SelectionDecision(selected_key=best_key, scores=scores, comments=comments)
+        return decision, summary
+
+    # Helpers -----------------------------------------------------------------
+    def _build_summary(
+        self,
+        candidates: List[CandidateInfo],
+        scores: Mapping[str, float],
+        comments: Mapping[str, str],
+        completion: Mapping[str, Any],
+    ) -> Dict[str, Dict[str, Any]]:
         summary: Dict[str, Dict[str, Any]] = {}
         for candidate in candidates:
-            score = float(decision.scores.get(candidate.key, 0.0))
-            comment = decision.comments.get(candidate.key, "")
             session_id = candidate.session_id
             entry: Dict[str, Any] = {
-                "score": score,
-                "comment": comment,
+                "score": float(scores.get(candidate.key, 0.0)),
+                "comment": comments.get(candidate.key, ""),
                 "session_id": session_id,
                 "branch": candidate.branch,
                 "worktree": str(candidate.worktree),
             }
             if session_id and session_id in completion:
-                comp_info = completion[session_id]
-                entry.update(comp_info)
+                entry.update(completion[session_id])
             else:
                 entry.setdefault("done", True)
             summary[candidate.key] = entry
         return summary
+
+    def _auto_score_candidate(
+        self,
+        candidate: CandidateInfo,
+        completion: Mapping[str, Any],
+    ) -> tuple[float, str]:
+        session_id = candidate.session_id
+        info = completion.get(session_id or "", {}) if session_id else {}
+        done = bool(info.get("done", True))
+
+        if not done:
+            return 0.0, "未完了"
+
+        stats = self._diff_stats(candidate.branch)
+        score = 60.0
+        comment_parts = []
+
+        files = stats.get("files", 0)
+        insertions = stats.get("insertions", 0)
+        deletions = stats.get("deletions", 0)
+
+        if files > 0:
+            score += min(15.0, files * 3.0)
+            comment_parts.append(f"files={files}")
+        if insertions > 0:
+            score += min(15.0, insertions / 10.0)
+            comment_parts.append(f"+{insertions}")
+        if deletions > 0:
+            score += min(5.0, deletions / 20.0)
+            comment_parts.append(f"-{deletions}")
+        if info.get("errors"):
+            score -= 10.0
+            comment_parts.append("errors detected")
+
+        score = max(0.0, min(100.0, score))
+        comment = ", ".join(comment_parts)
+        return score, comment
+
+    def _diff_stats(self, branch_name: str) -> Dict[str, int]:
+        stats = {"files": 0, "insertions": 0, "deletions": 0}
+        try:
+            numstat = self._repo.git.diff("HEAD", branch_name, "--numstat")
+        except git.GitCommandError:
+            return stats
+
+        for line in numstat.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                insertions, deletions = parts[:2]
+                try:
+                    stats["insertions"] += int(insertions)
+                    stats["deletions"] += int(deletions)
+                    stats["files"] += 1
+                except ValueError:
+                    continue
+        return stats
 
 
 class LogManager:

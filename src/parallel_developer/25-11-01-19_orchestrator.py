@@ -56,12 +56,9 @@ class Orchestrator:
     def run_cycle(
         self,
         instruction: str,
-        selector: Callable[[List[CandidateInfo]], SelectionDecision],
+        selector: Optional[Callable[[List[CandidateInfo]], SelectionDecision]] = None,
     ) -> OrchestrationResult:
         """Execute a single orchestrated instruction cycle."""
-
-        if selector is None:
-            raise ValueError("selector must be provided to choose a candidate.")
 
         worker_roots = self._worktree.prepare()
         boss_path = self._worktree.boss_path
@@ -137,15 +134,14 @@ class Orchestrator:
             )
         )
 
-        decision = selector(candidates)
+        decision, scoreboard = self._auto_or_select(candidates, completion_info, selector)
+
         candidate_keys = {candidate.key for candidate in candidates}
         if decision.selected_key not in candidate_keys:
             raise ValueError(
                 f"Selector returned unknown candidate '{decision.selected_key}'. "
                 f"Known candidates: {sorted(candidate_keys)}"
             )
-
-        scoreboard = self._boss.finalize_scores(candidates, decision, completion_info)
 
         selected_info = next(candidate for candidate in candidates if candidate.key == decision.selected_key)
         if selected_info.session_id is None:
@@ -200,3 +196,17 @@ class Orchestrator:
             "\n\nWhen you have completed the requested work, respond with exactly `/done`."
         )
         return instruction.rstrip() + directive
+
+    def _auto_or_select(
+        self,
+        candidates: List[CandidateInfo],
+        completion_info: Mapping[str, Any],
+        selector: Optional[Callable[[List[CandidateInfo]], SelectionDecision]],
+    ) -> tuple[SelectionDecision, Dict[str, Dict[str, Any]]]:
+        if selector is not None:
+            decision = selector(candidates)
+            scoreboard = self._boss.finalize_scores(candidates, decision, completion_info)
+            return decision, scoreboard
+
+        decision, scoreboard = self._boss.auto_select(candidates, completion_info)
+        return decision, scoreboard

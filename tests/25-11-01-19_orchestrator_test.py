@@ -53,12 +53,20 @@ def dependencies():
 
     monitor.register_manual_session.return_value = "session-boss"
 
-    boss.finalize_scores.return_value = {
+    boss_scores = {
         "worker-1": {"score": 60},
         "worker-2": {"score": 70},
         "worker-3": {"score": 50},
         "boss": {"score": 95},
     }
+    boss.auto_select.return_value = (
+        SelectionDecision(
+            selected_key="boss",
+            scores={"worker-1": 60, "worker-2": 70, "worker-3": 50, "boss": 95},
+            comments={"boss": "auto"},
+        ),
+        boss_scores,
+    )
 
     return {
         "tmux": tmux,
@@ -68,7 +76,7 @@ def dependencies():
         "logger": logger,
         "instruction": instruction,
         "fork_map": fork_map,
-        "boss_scores": boss.finalize_scores.return_value,
+        "boss_scores": boss_scores,
     }
 
 
@@ -83,20 +91,7 @@ def test_orchestrator_runs_happy_path(dependencies):
         session_name="parallel-dev",
     )
 
-    def selector(candidates: List[CandidateInfo]) -> SelectionDecision:
-        assert {c.key for c in candidates} == {"worker-1", "worker-2", "worker-3", "boss"}
-        return SelectionDecision(
-            selected_key="boss",
-            scores={
-                "worker-1": 60,
-                "worker-2": 70,
-                "worker-3": 50,
-                "boss": 95,
-            },
-            comments={"boss": "Best integration"},
-        )
-
-    result = orchestrator.run_cycle(dependencies["instruction"], selector=selector)
+    result = orchestrator.run_cycle(dependencies["instruction"])
 
     dependencies["worktree"].prepare.assert_called_once()
     tmux = dependencies["tmux"]
@@ -130,7 +125,7 @@ def test_orchestrator_runs_happy_path(dependencies):
     monitor.await_completion.assert_called_once_with(
         session_ids=list(dependencies["fork_map"].values())
     )
-    dependencies["boss"].finalize_scores.assert_called_once()
+    dependencies["boss"].auto_select.assert_called_once()
     worktree.merge_into_main.assert_called_once_with("parallel-dev/boss")
     tmux.promote_to_main.assert_called_once_with(
         session_id="session-boss",

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Optional
 
 import typer
 
-from .orchestrator import CandidateInfo, Orchestrator, SelectionDecision
+from .orchestrator import Orchestrator
 from .services import (
     BossManager,
     CodexMonitor,
@@ -18,6 +18,7 @@ from .services import (
 )
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, invoke_without_command=True)
+
 
 @app.callback()
 def main(
@@ -41,10 +42,9 @@ def main(
     """Execute a full orchestrated cycle for the given instruction."""
 
     orchestrator = build_orchestrator(worker_count=workers, log_dir=log_dir)
-    decision_selector = build_interactive_selector()
-    result = orchestrator.run_cycle(instruction, selector=decision_selector)
+    result = orchestrator.run_cycle(instruction)
 
-    typer.echo("\n=== Final Scoreboard ===")
+    typer.echo("\n=== Scoreboard (auto-evaluated) ===")
     for key, data in sorted(
         result.sessions_summary.items(),
         key=lambda item: item[1].get("score", 0.0),
@@ -63,11 +63,7 @@ def build_orchestrator(worker_count: int, log_dir: Optional[Path]) -> Orchestrat
     session_name = "parallel-dev"
     timestamp = datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
 
-    if log_dir is None:
-        base_logs_dir = Path("logs") / timestamp
-    else:
-        base_logs_dir = Path(log_dir)
-
+    base_logs_dir = Path(log_dir) if log_dir else Path("logs") / timestamp
     base_logs_dir.mkdir(parents=True, exist_ok=True)
     session_map_path = base_logs_dir / "sessions_map.yaml"
 
@@ -75,14 +71,15 @@ def build_orchestrator(worker_count: int, log_dir: Optional[Path]) -> Orchestrat
         logs_dir=base_logs_dir,
         session_map_path=session_map_path,
     )
+    worktree_root = Path.cwd()
     tmux_manager = TmuxLayoutManager(
         session_name=session_name,
         worker_count=worker_count,
         monitor=monitor,
-        root_path=Path.cwd(),
+        root_path=worktree_root,
     )
-    worktree_manager = WorktreeManager(root=Path.cwd(), worker_count=worker_count)
-    boss_manager = BossManager()
+    worktree_manager = WorktreeManager(root=worktree_root, worker_count=worker_count)
+    boss_manager = BossManager(repo_path=worktree_root)
     log_manager = LogManager(logs_dir=base_logs_dir)
 
     return Orchestrator(
@@ -94,57 +91,3 @@ def build_orchestrator(worker_count: int, log_dir: Optional[Path]) -> Orchestrat
         worker_count=worker_count,
         session_name=session_name,
     )
-
-
-def build_interactive_selector():
-    """Create a selector callable that prompts the user for scores and a choice."""
-
-    def selector(candidates: List[CandidateInfo]) -> SelectionDecision:
-        typer.echo("=== Candidate Evaluation ===")
-        scores: Dict[str, float] = {}
-        comments: Dict[str, str] = {}
-
-        for candidate in candidates:
-            typer.echo(
-                f"[{candidate.key}] {candidate.label} | branch={candidate.branch} | worktree={candidate.worktree}"
-            )
-            score = typer.prompt(
-                f"Score for {candidate.key}",
-                type=float,
-                default=0.0,
-            )
-            comment = typer.prompt(
-                f"Comment for {candidate.key} (optional)",
-                default="",
-            )
-            scores[candidate.key] = score
-            if comment.strip():
-                comments[candidate.key] = comment.strip()
-
-        sorted_keys = sorted(scores, key=lambda k: scores[k], reverse=True)
-        default_choice = sorted_keys[0] if sorted_keys else candidates[0].key
-        available = ", ".join(sorted(scores.keys()))
-        selection = typer.prompt(
-            f"Select candidate to adopt ({available})",
-            default=default_choice,
-        )
-        while selection not in scores:
-            selection = typer.prompt(
-                f"Invalid choice. Select one of ({available})",
-                default=default_choice,
-            )
-
-        typer.echo("\n=== Provisional Scoreboard ===")
-        for key in sorted_keys:
-            summary = f"{scores[key]:.2f}"
-            if key == selection:
-                summary += "  <-- selected"
-            typer.echo(f"{key:>10}: {summary}")
-
-        return SelectionDecision(
-            selected_key=selection,
-            scores=scores,
-            comments=comments,
-        )
-
-    return selector

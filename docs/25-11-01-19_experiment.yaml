@@ -15,8 +15,8 @@
   details:
     - "WorktreeManagerにboss用ワークツリーとfast-forwardマージ機能を追加"
     - "CodexMonitorでmanual session登録をサポートし、bossセッション投入を自動化"
-    - "Orchestratorに候補リスト/選択フローを導入し、CLIでスコア入力〜採用選択のUIを実装"
-    - "BossManagerでスコアボード集計、LogManagerで結果を記録"
+    - "Orchestratorで自動スコアリング＆採用決定フローを実装し、CLIは結果表示のみ"
+    - "BossManagerでgit差分を用いた自動評価を行い、LogManagerで結果を記録"
   reproduce:
     - "uv run pytest"
   result: "tests 12 passed"

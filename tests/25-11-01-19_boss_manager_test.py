@@ -1,11 +1,19 @@
 from pathlib import Path
 
+import git
+
 from parallel_developer.orchestrator import CandidateInfo, SelectionDecision
 from parallel_developer.services import BossManager
 
 
-def test_boss_manager_prefers_highest_score():
-    manager = BossManager()
+def test_boss_manager_prefers_highest_score(tmp_path: Path):
+    repo = git.Repo.init(tmp_path, initial_branch="main")
+    base = tmp_path / "README.md"
+    base.write_text("base\n", encoding="utf-8")
+    repo.index.add([str(base)])
+    repo.index.commit("init")
+
+    manager = BossManager(repo_path=tmp_path)
     completion = {
         "session-a": {"done": True, "score": 75},
         "session-b": {"done": True, "score": 90},
@@ -48,3 +56,36 @@ def test_boss_manager_prefers_highest_score():
     assert scoreboard["worker-2"]["comment"] == "best"
     assert scoreboard["worker-2"]["done"] is True
     assert scoreboard["boss"]["done"] is True
+
+
+def test_boss_manager_auto_select(tmp_path: Path):
+    repo = git.Repo.init(tmp_path, initial_branch="main")
+    base = tmp_path / "README.md"
+    base.write_text("base\n", encoding="utf-8")
+    repo.index.add([str(base)])
+    repo.index.commit("init")
+
+    worker_branch = "parallel-dev/worker-1"
+    repo.git.branch(worker_branch)
+    repo.git.checkout(worker_branch)
+    feature = tmp_path / "feature.txt"
+    feature.write_text("change\n", encoding="utf-8")
+    repo.index.add([str(feature)])
+    repo.index.commit("feat")
+    repo.git.checkout("main")
+
+    manager = BossManager(repo_path=tmp_path)
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch=worker_branch,
+        worktree=tmp_path,
+    )
+    decision, summary = manager.auto_select(
+        [candidate],
+        completion={"session-worker-1": {"done": True}},
+    )
+
+    assert decision.selected_key == "worker-1"
+    assert summary["worker-1"]["score"] > 60
