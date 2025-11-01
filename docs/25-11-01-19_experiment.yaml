@@ -1,0 +1,11 @@
+- date: "2025-11-01"
+  time_utc: "09:56:00"
+  summary: "要件定義をもとにCLI・オーケストレーターをTTDで完成させた"
+  details:
+    - "uv環境とpyprojectを整備し、pytestを導入"
+    - "OrchestratorとCLIのテストを先行作成し、tmux制御・完了検知・Boss統合まで実装"
+    - "サービス層（WorktreeManager, CodexMonitor, LogManager, BossManager, TmuxLayoutManager）をテスト駆動で構築"
+  reproduce:
+    - "uv run pytest"
+  result: "tests 10 passed"
+  notes: "実TMUX制御はlibtmuxスタブで検証、実環境でのキー送出確認が今後の確認事項"
