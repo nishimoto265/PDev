@@ -195,28 +195,49 @@ class CommandHint(Static):
         )
 
 
-class CommandPalette(OptionList):
+class CommandPalette(Static):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.display = False
         self._items: List[PaletteItem] = []
+        self._active_index: int = 0
 
     def set_items(self, items: List[PaletteItem]) -> None:
-        self.clear_options()
         self._items = items
-        for idx, item in enumerate(items):
-            self.add_option(Option(item.label, id=str(idx)))
-        if self._items:
-            self.index = 0
+        self._active_index = 0
+        if not items:
+            self.display = False
+            self.update("")
+            return
+        self.display = True
+        self._render()
 
-    def get_item(self, option_id: str) -> Optional[PaletteItem]:
-        try:
-            index = int(option_id)
-        except (TypeError, ValueError):
+    def _render(self) -> None:
+        if not self._items:
+            self.update("")
+            return
+        lines = []
+        for idx, item in enumerate(self._items):
+            prefix = "▶ " if idx == self._active_index else "  "
+            lines.append(f"{prefix}{item.label}")
+        self.update("\n".join(lines))
+
+    def move_next(self) -> None:
+        if not self._items:
+            return
+        self._active_index = (self._active_index + 1) % len(self._items)
+        self._render()
+
+    def move_previous(self) -> None:
+        if not self._items:
+            return
+        self._active_index = (self._active_index - 1) % len(self._items)
+        self._render()
+
+    def get_active_item(self) -> Optional[PaletteItem]:
+        if not self._items:
             return None
-        if 0 <= index < len(self._items):
-            return self._items[index]
-        return None
+        return self._items[self._active_index]
 
 
 class CLIController:
@@ -1003,6 +1024,8 @@ class ParallelDeveloperApp(App):
         if not suggestions:
             self._hide_command_palette()
             return
+        if self.command_input:
+            self.command_input.value = prefix
         items = [PaletteItem(f"{s.name:<10} {s.description}", s.name) for s in suggestions]
         self._show_command_palette(items, mode="command")
 
@@ -1014,8 +1037,8 @@ class ParallelDeveloperApp(App):
             return
         self._palette_mode = mode
         self.command_palette.set_items(items)
-        self.command_palette.display = True
-        self.command_palette.focus()
+        if self.command_input and self.command_input.has_focus:
+            self.set_focus(self.command_input)
 
     def _hide_command_palette(self) -> None:
         if self.command_palette:
@@ -1038,20 +1061,11 @@ class ParallelDeveloperApp(App):
             self.command_palette.action_cursor_up()
 
     async def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if self.selection_list and event.option_list is self.selection_list:
+        if self.command_palette and self.command_palette.display:
             event.stop()
-            try:
-                index = int(event.option_id)
-            except (TypeError, ValueError):
-                return
-            self.controller._resolve_selection(index)
-            return
-        if self.command_palette and event.option_list is self.command_palette:
-            event.stop()
-            item = self.command_palette.get_item(event.option_id)
-            if not item:
-                return
-            await self._handle_palette_selection(item)
+            item = self.command_palette.get_active_item()
+            if item:
+                await self._handle_palette_selection(item)
 
     async def _handle_palette_selection(self, item: PaletteItem) -> None:
         if self._palette_mode == "command":
