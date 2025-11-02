@@ -216,3 +216,21 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
         pane_id="pane-boss",
         baseline={Path("/rollout-main"): 1.0},
     )
+
+
+def test_ensure_done_directive_always_appends(dependencies):
+    orchestrator = Orchestrator(
+        tmux_manager=Mock(),
+        worktree_manager=Mock(),
+        monitor=Mock(),
+        log_manager=Mock(),
+        worker_count=1,
+        session_name="parallel-dev",
+    )
+
+    instruction = "作業して完了したら /done"
+    ensured = orchestrator._ensure_done_directive(instruction)
+    assert "When you have completed the requested work" in ensured
+    assert ensured.endswith("`/done`.")
+    ensured_again = orchestrator._ensure_done_directive(ensured)
+    assert ensured_again == ensured

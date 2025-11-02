@@ -445,12 +445,11 @@ class Orchestrator:
             )
 
     def _ensure_done_directive(self, instruction: str) -> str:
-        marker = "/done"
-        if marker in instruction:
-            return instruction
         directive = (
             "\n\nWhen you have completed the requested work, respond with exactly `/done`."
         )
+        if directive.strip() in instruction:
+            return instruction
         return instruction.rstrip() + directive
 
     def _auto_or_select(
