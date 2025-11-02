@@ -6,11 +6,11 @@ metadata:
     CLI上で複数のコーディングエージェントを並列稼働させ、最終的にBossエージェントが
     出力を評価・統合できるOSSを開発する。
 現在の状況:
-  ステータス: "要件定義中"
+  ステータス: "実装・検証中"
   未解決事項:
-    - "エージェントが利用する具体的なLLMやエンジンの選定"
-    - "Bossエージェントの採点アルゴリズム・指標の詳細"
-    - "フォーク後に取得した新セッションIDの記録・共有方式"
+    - "エージェントが利用する具体的なLLM/モデルの選定と設定手順"
+    - "実tmux環境でのキー送出安定性およびCodex応答遅延に対するリトライ戦略"
+    - "Boss評価プロンプトと採点ガイドラインの継続的な調整"
 概要:
   目標: >
     同一指示を複数エージェントへ同時配信し、その成果をBossエージェントが評価・統合する
@@ -20,40 +20,41 @@ metadata:
     - "各エージェントのログを詳細に取得し、障害箇所を追跡できること。"
     - "Bossエージェントが任意のエージェント成果物を選択・統合し、継続作業に接続できること。"
   並列起動フロー:
-    - "ユーザーはメインCodexセッションに指示を送る。"
-    - "Orchestratorは直近のユーザー指示を捕捉し、メインセッションを即時中断する。"
-    - "保存した指示を用い、各ワークツリー用tmuxセッションで同一セッションをresumeし、自動フォーク（Esc操作送信）で独立セッションIDを得る。"
-    - "独立した各セッションへ指示を再送し、並列エージェントを起動する。"
+    - "ユーザーは`parallel-dev --instruction \"...\" --workers N`でメインCodexへ指示を送る。"
+    - "Orchestratorは指示を保存し、メインセッションへCtrl+Cを2回送ってCodexを安全に停止する。"
+    - "共有された指示を基に、各ワークツリー用tmuxペインで`codex resume <main_session_id>`を実行し、Esc×2→Enterで独立セッションIDを取得する。"
+    - "workerはフォーク後にEnterのみを送信して処理を確定し、完了時に`/done`を返信する。"
+    - "全worker完了後にBossが同様にフォークし、評価JSONを返して`/done`で完了を通知する。"
 詳細フロー:
   前提:
-    - "起動時に`parallel-dev` CLIが依頼内容を受信し、内部で `/done` 指示を含むテンプレートへ整形する。"
-    - "メインCodexは空の状態から指示を受け取り、Escで中断される。worker Codexはフォークされた履歴を持ち、同じ指示で再開する。"
-    - "Boss Codexは評価用に起動し、後工程で採用案を統合する役割を持つ。"
+    - "`parallel-dev --instruction \"...\" --workers N` が起動時に指示を受信し、末尾へ`/done`指示を付与する。"
+    - "メインCodexは`codex`で起動し、指示送信後にCtrl+C×2で中断して履歴を保持する。"
+    - "worker Codexはフォークされた履歴を共有し、Esc×2→Enterで独立セッションへ派生した後にEnterのみを送信する。"
+    - "Boss Codexは全worker完了後にフォークされ、評価JSONを返してから`/done`する役割を持つ。"
   手順:
-    - "CLIがワークツリーを準備：`.parallel-dev/worktrees/worker-N` を生成し、各worker用に切り替える。"
-    - "tmuxレイアウトを作成し、メイン/Boss/worker*Nペインに `codex` コマンドを送信。"
-    - "メインペインに指示を送信し、Escで中断→`codex resume` で履歴を保持。"
-    - "CodexMonitorがメインセッションIDを記録し、workerペインへフォーク後の新セッションIDが登録されるまで監視。"
-    - "workerペインで `codex resume <session_id>` を実行し、指示（`/done`含む）を再送。各workerは完了時に `/done` を出力。"
-    - "CodexMonitorが `/done` を検出したセッションから順に完了扱いとし、全worker分揃ったら次工程へ進める。"
-    - "Bossエージェント（または補助スクリプト）が各workerと自分の成果物を評価し、`score` と `comment` を生成、`logs/<timestamp>/cycles/*.yaml` へ記録。"
-    - "CLIがスコアボード（例: `worker-1 80`, `worker-2 50`, `boss 90`）と詳細を表示。ユーザーは採用案（worker or boss）を入力する。"
-    - "採用案がworkerの場合：該当worktreeの差分を main ワークツリーへマージ。Bossの場合：Bossが統合したworktree内容を main へマージ。"
-    - "メインペインで`codex resume <採用セッションID>` を送信し、次サイクルの開始状態を整える。"
-    - "ログ一式（sessions_map.yaml, cycles/*.yaml, instruction.log）を保存し、CLIは処理結果を表示して終了。"
+    - "CLIがワークツリーを準備：`.parallel-dev/worktrees/worker-N` を生成し、各worker用ブランチを再作成する。"
+    - "tmuxレイアウトを作成し、メイン/Boss/worker*Nペインで`codex`を起動する。"
+    - "メインペインへ指示を送信し、即座にCtrl+C×2で中断。CodexMonitorが指示とセッションIDを`sessions_map.yaml`に登録する。"
+    - "workerペインで `codex resume <main_session_id>` を実行し、Esc×2→Enterでフォーク後にEnterのみ送信して指示を確定する。"
+    - "CodexMonitorが各workerの新セッションIDとrolloutパスを記録し、`/done`検出まで監視する。"
+    - "全workerが`/done`を出力したら、Bossペインで `codex resume <main_session_id>` → Esc×2→Enter を実行し、評価プロンプトを送る。"
+    - "BossはJSON形式で`scores`を返し、`/done`で完了。Monitorが結果を取り込み、LogManagerが`cycles/<timestamp>.yaml`へ書き出す。"
+    - "CLIがスコアボードと候補一覧を表示し、ユーザーは採用する案を番号で選択する。"
+    - "WorktreeManagerが選択ブランチをfast-forwardマージし、メインペインで`codex resume <採用セッションID>`を送信して次サイクルを整える。"
+    - "instruction.log・sessions_map.yaml・cycles/*.yaml などのログが `logs/<timestamp>/` に保存される。"
   評価・採用フロー:
-    - "全workerおよびBoss案を対象に、成果物・ログ・セッション情報からスコア（例: 0〜100）とコメントを算出する。"
-    - "スコアは自動評価が基本（例: `/done`検知 + git差分サイズ + エラー有無などを指標化）とし、必要なら追加コメントを付与できる。"
-    - "CLIはスコアボード（例: worker1 80, worker2 50, boss 90）と詳細情報を表示し、ユーザーに採用案を選択させるUIを提供する。"
-    - "選択された案のワークツリー内容をmainワークツリーへマージする。必要に応じてBoss案は統合済みの成果を使う。"
-    - "採用したセッションIDをメインCodexで`codex resume <id>`して、次サイクルの作業を継続できる状態にする。"
+    - "Boss Codexは評価プロンプトに従い、各候補に対する0〜100の`score`と`comment`をJSON形式で返す。"
+    - "CodexMonitorがBoss出力を取り込み、CLIがスコアボード（例: worker1 80, worker2 50, boss -）として表示する。"
+    - "ユーザーはCLIプロンプトで採用案を手動選択し、選択結果がスコアボードにマークされる。"
+    - "選択された候補のワークツリーをmainへfast-forwardマージし、必要に応じてBoss案はbossブランチを適用する。"
+    - "採用セッションIDをメインCodexで`codex resume <id>`し、次サイクルへ継続する。"
 主なインターフェース:
   cli:
     目的: "指示受付・パイプライン制御・結果承認を一元化するフロントエンド。将来的にGUIへ移行できるAPI設計を前提とする。"
     機能:
-      - "指示入力コマンド（例: `parallel-dev prompt \"...\"`）でメインCodexへ送信。"
+      - "指示入力コマンド（例: `parallel-dev --instruction \"...\" --workers 2`）でメインCodexへ送信。"
       - "tmuxレイアウト管理（セッション1個 + メイン/Boss/worker*Nペイン、Nのデフォルトは3）。"
-      - "ワークフロー状態遷移管理（指示受付→フォーク展開→完了検知→Boss採点→ユーザー選択→mainマージ→次サイクル）。"
+      - "ワークフロー状態遷移管理（指示受付→フォーク展開→完了検知→Boss採点→ユーザー選択→mainマージ→次サイクル）とスコアボード表示。"
       - "REST/IPC化を見据えた内部APIを提供し、将来的なGUI接続を想定。"
 tmuxレイアウト:
   セッション: "1つのtmuxセッションにメインCodex、Boss Codex、worker*Nの計N+2ペインを配置。"
@@ -63,20 +64,20 @@ tmuxレイアウト:
     - "Boss: 評価・統合・マージを行う。"
     - "worker: 並列開発を担当。必要に応じて追加生成・終了が可能。"
 ログ設計:
-  - "tmux各ペインの履歴は`logs/<タイムスタンプ>/<role>.log`に収集する。"
-  - "Codexのrollout JSONLは`logs/<タイムスタンプ>/sessions/<session_id>.jsonl`へコピー。"
-  - "CLIイベントログを`logs/<タイムスタンプ>/cli.log`に出力し、開始/終了ステージ・採点結果・エラーを記録。"
-  - "Boss評価結果や採点シートは`logs/<タイムスタンプ>/boss_eval.yaml`にまとめる。"
+  - "`logs/<タイムスタンプ>/sessions_map.yaml` にpane・session_id・rolloutパス・offsetを保存する。"
+  - "`logs/<タイムスタンプ>/instruction.log` に送信指示と対象paneを追記する。"
+  - "`logs/<タイムスタンプ>/cycles/<時刻>.yaml` にレイアウト、fork_map、完了状況、選択結果を記録する。"
+  - "rollout JSONL本体は`~/.codex/sessions`を参照し、必要に応じて`logs/<タイムスタンプ>/sessions/`へ複製する検討を継続する。"
 完了検知方式:
   - "各workerはタスク完了時に必ず`/done`メッセージを送信する（AGENTS.mdやプロンプトで厳守させる）。"
-  - "CLIはCodexのrollout JSONLを常時監視し、`/done`を検出したworkerを完了とみなす。すべてのworkerで検出できた時点でBossフェーズへ遷移する。"
-  - "一定時間内に`/done`が揃わない場合のみCLIがユーザーへ確認ダイアログ（CLI上のプロンプト）を提示し、手動で待機/中断を選択できるようにする。"
+  - "CodexMonitorがrollout JSONLを監視し、`/done`もしくは`scores`を含むJSONブロックを検出したセッションを完了とみなす。"
+  - "検出できなかったセッションは`done: False`としてログに残し、後続の選択処理で確認できる。"
+  - "タイムアウト時にユーザーへ確認ダイアログを提示する仕組みは未実装で、今後の検討事項とする。"
 セッションID取得:
- - "フォーク後、CLIは~/.codex/sessions/YYYY/MM/DD/配下のファイルイベントを監視し、新規に生成されたrollout-*.jsonlの先頭行（SessionMeta）をパースして`id`値を取得する。"
-  - "ファイル名に含まれるUUIDとSessionMeta内のIDを照合し、一致確認後にセッションIDとして採用する。"
-  - "監視が失敗した場合の冗長経路として、対象ペイン上で`codex resume --last --json`を実行し、JSON出力の`conversation_id`を抽出する。"
-  - "取得したIDは`logs/<タイムスタンプ>/sessions_map.yaml`にメインIDとの対応表として保存し、各worker ID → JSONLパス → git worktreeパスを紐づける。"
-  - "Bossが採用したセッションをメインに昇格させる際は、このMapを用いて対象セッションのJSONL・worktree・ペインIDを逆引きし、必要に応じてメインペインで`codex resume <採用ID>`を再起動する。"
+  - "フォーク後、CLIは~/.codex/sessions/YYYY/MM/DD/配下のrollout-*.jsonlを監視し、先頭行のSessionMetaから`id`を取得する。"
+  - "ファイル名に含まれるUUIDとSessionMeta内のIDを照合し、一致を確認してセッションIDとして採用する。"
+  - "取得したIDとrolloutパス・offsetは`logs/<タイムスタンプ>/sessions_map.yaml`に記録し、paneやworktreeとの対応関係を保持する。"
+  - "Bossが採用したセッションをメインに昇格させる際は、このMapを用いて対象セッションのJSONL・worktree・ペインIDを逆引きし、メインペインで`codex resume <採用ID>`を発行する。"
 機能要件:
   - id: F-001
     内容: "CLIコマンドでタスク指示を作成し、N個のエージェントに同時ブロードキャストする。"

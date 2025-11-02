@@ -133,3 +133,13 @@
   - uv run pytest
   result: tests 18 passed
   notes: メインpaneリジューム前にcodexが確実に終了し、既存セッションへ誤送信しなくなることを狙った変更
+- date: '2025-11-02'
+  time_utc: '19:55:00'
+  summary: 要件定義ドキュメントを現状仕様に合わせて更新
+  details:
+  - docs/requirement.yamlのステータス・並列起動フロー・評価/ログ設計の記述を最新実装と一致させた
+  - 完了検知方式とセッションID追跡の説明をCodexMonitorの実装に沿って整理
+  reproduce:
+  - N/A (ドキュメント更新のみ)
+  result: not run (docs-only)
+  notes: 次段階のリファクタリング前にドキュメントとの齟齬を解消
