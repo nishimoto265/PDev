@@ -350,9 +350,11 @@ class CLIController:
                 resume_session_id=resume_session,
             )
 
-        auto_attach_task = self._schedule_auto_attach()
+        auto_attach_task: Optional[asyncio.Task[None]] = None
         try:
             self._emit("log", {"text": f"指示を開始: {instruction}"})
+            if self._attach_mode == "auto":
+                auto_attach_task = asyncio.create_task(self._handle_attach_command(force=False))
             result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
             self._last_scoreboard = dict(result.sessions_summary)
             self._last_instruction = instruction
@@ -370,7 +372,11 @@ class CLIController:
             self._selection_context = None
             self._running = False
             self._emit_status("待機中")
-            await self._await_auto_attach(auto_attach_task)
+            if auto_attach_task:
+                try:
+                    await auto_attach_task
+                except Exception:  # pragma: no cover - logging handled inside
+                    self._emit("log", {"text": "[auto] tmuxへの接続処理でエラーが発生しました。"})
 
     def _resolve_selection(self, index: int) -> None:
         if not self._selection_context:
@@ -606,23 +612,6 @@ class CLIController:
                 return True
             await asyncio.sleep(delay)
         return False
-
-    def _schedule_auto_attach(self) -> Optional[asyncio.Task[None]]:
-        if self._attach_mode != "auto":
-            return None
-        loop = asyncio.get_running_loop()
-        return loop.create_task(
-            self._handle_attach_command(force=False),
-            name="parallel-dev-auto-attach",
-        )
-
-    async def _await_auto_attach(self, task: Optional[asyncio.Task[None]]) -> None:
-        if not task:
-            return
-        try:
-            await task
-        except Exception:  # pragma: no cover - logging handled inside run
-            self._emit("log", {"text": "[auto] tmuxへの接続処理でエラーが発生しました。"})
 
     def _load_settings(self) -> Dict[str, object]:
         if not self._settings_path.exists():
