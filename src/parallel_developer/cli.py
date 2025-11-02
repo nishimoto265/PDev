@@ -506,21 +506,20 @@ class ParallelDeveloperApp(App):
     }
 
     #log {
-        width: 70%;
         height: 1fr;
         border: round $accent;
-        margin-right: 1;
-    }
-
-    #scoreboard {
-        width: 30%;
-        height: 1fr;
-        border: round $accent-darken-1;
+        margin-bottom: 1;
     }
 
     #status {
         border: round $accent-lighten-1;
         padding: 1;
+    }
+
+    #selection {
+        border: round $accent-darken-1;
+        padding: 1;
+        margin-bottom: 1;
     }
 
     #hint {
@@ -556,12 +555,11 @@ class ParallelDeveloperApp(App):
             with Vertical():
                 self.status_panel = StatusPanel(id="status")
                 yield self.status_panel
-                with Horizontal():
-                    self.log_panel = EventLog(id="log", max_lines=200)
-                    yield self.log_panel
-                    self.selection_list = OptionList(id="selection")
-                    self.selection_list.display = False
-                    yield self.selection_list
+                self.log_panel = EventLog(id="log", max_lines=400)
+                yield self.log_panel
+                self.selection_list = OptionList(id="selection")
+                self.selection_list.display = False
+                yield self.selection_list
                 hint = CommandHint(id="hint")
                 hint.update_hint()
                 yield hint
