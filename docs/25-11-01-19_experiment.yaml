@@ -73,3 +73,14 @@
   - N/A (ドキュメント更新のみ)
   result: not run (docs-only)
   notes: 今後の実装リファクタリング前提としてドキュメントの齟齬を解消
+- date: '2025-11-02'
+  time_utc: '20:20:00'
+  summary: 日付付きモジュールを整理しログ処理を共通化
+  details:
+  - 日付付きのCLI/サービス/オーケストレーターのシンボリックリンクを廃止し、本体ファイルへ統合
+  - HELLO系スクリプトを`hello_*`命名へリネームし、logging_utils.configure_file_loggerでログ設定を共通化
+  - pytestのテストファイルを`*_test.py`へ整理し、conftestでsrcディレクトリをPATHに追加
+  reproduce:
+  - uv run pytest
+  result: tests 19 passed
+  notes: 旧ログファイル名との互換性は新テストで保証、logs/ 配下の新命名へ移行

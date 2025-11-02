@@ -3,10 +3,10 @@ import sys
 from pathlib import Path
 
 
-def test_hello_stdout_script_prints_and_logs():
+def test_hello_script_prints_and_logs():
     project_root = Path(__file__).resolve().parents[1]
-    script_path = project_root / "src" / "parallel_developer" / "25-11-02-10_hello_stdout.py"
-    log_path = project_root / "logs" / "25-11-02-10_hello_stdout.log"
+    script_path = project_root / "src" / "parallel_developer" / "hello_logged_verbose.py"
+    log_path = project_root / "logs" / "hello_logged_verbose.log"
 
     if log_path.exists():
         log_path.unlink()
@@ -23,6 +23,6 @@ def test_hello_stdout_script_prints_and_logs():
 
     assert log_path.exists(), "Expected log file was not created."
     log_content = log_path.read_text(encoding="utf-8")
-    assert "hello_stdout_script_start" in log_content
-    assert "hello_stdout_script_message_prepared" in log_content
-    assert "hello_stdout_script_complete" in log_content
+    assert "hello_logged_verbose_start" in log_content
+    assert "hello_logged_verbose_message_prepared" in log_content
+    assert "hello_logged_verbose_complete" in log_content

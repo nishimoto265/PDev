@@ -6,7 +6,12 @@ from pathlib import Path
 
 
 def test_script_prints_hello() -> None:
-    script_path = Path(__file__).resolve().parents[1] / "src" / "25-11-02-10_hello.py"
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "parallel_developer"
+        / "hello_logged_verbose.py"
+    )
 
     result = subprocess.run(
         [sys.executable, str(script_path)],

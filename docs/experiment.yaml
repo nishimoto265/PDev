@@ -143,3 +143,14 @@
   - N/A (ドキュメント更新のみ)
   result: not run (docs-only)
   notes: 次段階のリファクタリング前にドキュメントとの齟齬を解消
+- date: '2025-11-02'
+  time_utc: '20:20:00'
+  summary: 日付付きモジュールの整理とログ共通化
+  details:
+  - シンボリックリンク化されていた日付付きCLI/サービス/オーケストレーターを本体ファイルへ集約
+  - HELLO系サンプルを`hello_*`命名へ統一し、logging_utils.configure_file_loggerで重複コードを排除
+  - pytestテスト名を`*_test.py`へ揃え、conftestでsrcをsys.pathに追加してローカルパッケージを優先読み込み
+  reproduce:
+  - uv run pytest
+  result: tests 19 passed
+  notes: ログファイル名も`hello_*.log`へ刷新し、各テストで新しい出力を検証済み
