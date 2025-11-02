@@ -7,8 +7,10 @@ from parallel_developer.services import TmuxLayoutManager
 
 
 class DummyPane:
-    def __init__(self, pane_id):
+    def __init__(self, pane_id, height=24, width=120):
         self.pane_id = pane_id
+        self.height = height
+        self.width = width
         self.sent = []
         self.cmd_calls = []
 
@@ -23,6 +25,7 @@ class DummyWindow:
     def __init__(self):
         self.panes = [DummyPane("%0")]
         self.select_layout_args = []
+        self.selected_pane = self.panes[0]
 
     def split_window(self, attach=False):
         pane = DummyPane(f"%{len(self.panes)}")
@@ -31,6 +34,12 @@ class DummyWindow:
 
     def select_layout(self, layout):
         self.select_layout_args.append(layout)
+
+    def select_pane(self, target_pane):
+        for pane in self.panes:
+            if pane.pane_id == target_pane:
+                self.selected_pane = pane
+                break
 
 
 class DummySession:

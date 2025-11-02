@@ -54,7 +54,9 @@ class TmuxLayoutManager:
 
         target_pane_count = self.worker_count + 2  # main + boss + workers
         while len(window.panes) < target_pane_count:
-            window.split_window(attach=False)
+            self._split_largest_pane(window)
+            window.select_layout("tiled")
+            window = getattr(session, "attached_window", None) or session.windows[0]
         window.select_layout("tiled")
 
         panes = window.panes
@@ -64,6 +66,15 @@ class TmuxLayoutManager:
             "workers": [pane.pane_id for pane in panes[2 : 2 + self.worker_count]],
         }
         return layout
+
+    def _split_largest_pane(self, window) -> None:
+        panes = list(window.panes)
+        if not panes:
+            window.split_window(attach=False)
+            return
+        largest = max(panes, key=lambda pane: int(pane.height) * int(pane.width))
+        window.select_pane(largest.pane_id)
+        window.split_window(attach=False)
 
     def launch_main_session(self, *, pane_id: str) -> None:
         command = (
