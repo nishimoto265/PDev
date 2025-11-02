@@ -1,14 +1,21 @@
 import pytest
 
+from textual import events
 from textual.widgets import Input, OptionList
 
-from parallel_developer.cli import CommandPalette, ControllerEvent, ParallelDeveloperApp
+from parallel_developer.cli import (
+    CommandPalette,
+    ControllerEvent,
+    EventLog,
+    ParallelDeveloperApp,
+)
 
 
 @pytest.mark.asyncio
 async def test_command_palette_opens_on_slash() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
         await pilot.press("/")  # 入力欄にスラッシュを送信
         await pilot.pause()
         palette = app.query_one("#command-palette", CommandPalette)
@@ -22,6 +29,7 @@ async def test_command_palette_opens_on_slash() -> None:
 async def test_command_palette_navigate_with_arrow() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
         await pilot.press("/")
         await pilot.pause()
         palette = app.query_one("#command-palette", CommandPalette)
@@ -35,19 +43,21 @@ async def test_command_palette_navigate_with_arrow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_click_log_keeps_focus_on_input() -> None:
+async def test_click_log_focuses_log_for_selection() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
-        command_input = app.query_one("#command", Input)
+        await pilot.pause()
+        event_log = app.query_one("#log", EventLog)
         await pilot.click("#log")
         await pilot.pause()
-        assert command_input.has_focus
+        assert event_log.has_focus
 
 
 @pytest.mark.asyncio
 async def test_click_body_refocuses_input_when_selection_hidden() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
         command_input = app.query_one("#command", Input)
         await pilot.click("#body")
         await pilot.pause()
@@ -58,6 +68,7 @@ async def test_click_body_refocuses_input_when_selection_hidden() -> None:
 async def test_option_list_click_keeps_focus_on_selection() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
         payload = {
             "candidates": ["1. worker-1 (session abc)", "2. worker-2 (session def)"],
             "scoreboard": {},
@@ -68,3 +79,29 @@ async def test_option_list_click_keeps_focus_on_selection() -> None:
         await pilot.click("#selection")
         await pilot.pause()
         assert selection.has_focus
+
+
+@pytest.mark.asyncio
+async def test_event_log_copy_to_clipboard() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        event_log = app.query_one("#log", EventLog)
+        event_log.log("alpha")
+        event_log.log("beta")
+        await pilot.pause()
+        select_event = events.Key("ctrl+a", None)
+        copy_event = events.Key("ctrl+shift+c", None)
+        assert app._handle_text_shortcuts(select_event) is True
+        selection = event_log.text_selection
+        if selection:
+            extracted = event_log.get_selection(selection)
+            if extracted:
+                text, ending = extracted
+                assert "alpha" in text
+                assert "beta" in text
+        app.copy_to_clipboard("")
+        assert app._handle_text_shortcuts(copy_event) is True
+        await pilot.pause()
+        assert "alpha" in app.clipboard
+        assert "beta" in app.clipboard

@@ -19,11 +19,14 @@ from subprocess import PIPE
 from textual import events
 from textual.app import App, ComposeResult
 from rich.text import Text
+from contextlib import suppress
+
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
+from textual.dom import NoScreen
 
 from .orchestrator import CandidateInfo, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
@@ -183,9 +186,6 @@ class StatusPanel(Static):
 
 
 class EventLog(RichLog):
-    can_focus = False
-    focus_on_click = False
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, highlight=True, markup=True, **kwargs)
 
@@ -1107,6 +1107,8 @@ class ParallelDeveloperApp(App):
             self.command_palette.move_previous()
 
     def on_key(self, event: events.Key) -> None:
+        if self._handle_text_shortcuts(event):
+            return
         if self.command_palette and self.command_palette.display:
             if event.key in {"down", "j"}:
                 self.command_palette.move_next()
@@ -1114,6 +1116,61 @@ class ParallelDeveloperApp(App):
             elif event.key in {"up", "k"}:
                 self.command_palette.move_previous()
                 event.stop()
+
+    def _handle_text_shortcuts(self, event: events.Key) -> bool:
+        shortcuts_select_all = {
+            "ctrl+a",
+            "control+a",
+            "cmd+a",
+            "command+a",
+            "meta+a",
+            "ctrl+shift+a",
+            "control+shift+a",
+        }
+        shortcuts_copy = {
+            "ctrl+c",
+            "control+c",
+            "cmd+c",
+            "command+c",
+            "meta+c",
+            "ctrl+shift+c",
+            "control+shift+c",
+            "cmd+shift+c",
+            "command+shift+c",
+            "meta+shift+c",
+        }
+
+        def matches(shortcuts: set[str]) -> bool:
+            key_value = event.key.lower()
+            name_value = (event.name or "").lower()
+            if key_value in shortcuts:
+                return True
+            if name_value and name_value in {shortcut.replace("+", "_") for shortcut in shortcuts}:
+                return True
+            return False
+
+        if matches(shortcuts_select_all):
+            if self.log_panel:
+                self.log_panel.text_select_all()
+            event.stop()
+            return True
+        if matches(shortcuts_copy) and self.log_panel:
+            clipboard_text: Optional[str] = None
+            selection = None
+            with suppress(NoScreen):
+                selection = self.log_panel.text_selection
+            if selection:
+                extracted = self.log_panel.get_selection(selection)
+                if extracted:
+                    text, ending = extracted
+                    clipboard_text = text if ending is None else f"{text}{ending}"
+            if not clipboard_text:
+                clipboard_text = "\n".join(strip.text.rstrip() for strip in self.log_panel.lines)
+            if clipboard_text:
+                self.copy_to_clipboard(clipboard_text)
+                event.stop()
+                return True
+        return False
 
     def on_click(self, event: events.Click) -> None:
         if not self.command_input:
@@ -1127,6 +1184,8 @@ class ParallelDeveloperApp(App):
             return bool(widget and widget in control.ancestors_with_self)
 
         if within(self.command_input):
+            return
+        if self.log_panel and within(self.log_panel):
             return
         if self.selection_list and self.selection_list.display and within(self.selection_list):
             return
