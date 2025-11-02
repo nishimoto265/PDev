@@ -133,6 +133,7 @@ class TmuxLayoutManager:
                 raise RuntimeError(
                     f"pane {pane_id!r} に対応するワークツリーパスがありません"
                 ) from exc
+            self.interrupt_pane(pane_id=pane_id)
             command = (
                 f"cd {shlex.quote(str(worker_path))} && "
                 f"codex resume {shlex.quote(str(base_session_id))}"
