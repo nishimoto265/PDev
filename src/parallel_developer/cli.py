@@ -57,6 +57,7 @@ class InteractiveCLI:
 
     def run(self) -> None:
         typer.echo("Parallel Developer CLI (type /help for commands, /exit to quit)")
+        self._print_status(show_commands=True)
         while True:
             try:
                 raw = input("pdev> ").strip()
@@ -88,6 +89,10 @@ class InteractiveCLI:
 
         if name == "/help":
             self._print_help()
+            return True
+
+        if name == "/status":
+            self._print_status(show_commands=False)
             return True
 
         if name == "/parallel":
@@ -133,6 +138,7 @@ class InteractiveCLI:
                   /mode main      : メインのみで実行
                   /mode parallel  : 並列実行に戻す
                   /resume         : 過去セッションを再開
+                  /status         : 現在の状態を表示
                   /scoreboard     : 直近のスコアボードを表示
                   /help           : このヘルプを表示
                   /exit           : CLIを終了
@@ -146,6 +152,7 @@ class InteractiveCLI:
 
     def _handle_instruction(self, instruction: str) -> None:
         logs_dir = self._create_cycle_logs_dir()
+        typer.echo("[parallel-dev] メインセッションを準備中...")
         orchestrator = self._builder(
             worker_count=self._config.worker_count,
             log_dir=logs_dir,
@@ -156,12 +163,14 @@ class InteractiveCLI:
         def selector(candidates: List[CandidateInfo], scoreboard: dict | None = None) -> SelectionDecision:
             return self._selection_prompt(candidates, scoreboard)
 
+        typer.echo("[parallel-dev] 指示を送信し、ワーカーを起動しています...")
         result = orchestrator.run_cycle(instruction, selector=selector)
 
         self._config.reuse_existing_session = True
         self._last_scoreboard = dict(result.sessions_summary)
         self._last_instruction = instruction
 
+        typer.echo("[parallel-dev] スコアボードを更新しました。")
         self._print_scoreboard(self._last_scoreboard)
 
         if result.artifact:
@@ -408,6 +417,23 @@ class InteractiveCLI:
             boss=boss_record,
             workers=workers,
         )
+
+    def _print_status(self, *, show_commands: bool) -> None:
+        typer.echo(
+            textwrap.dedent(
+                f"""
+                --- Current Session ---
+                tmux session : {self._config.tmux_session}
+                mode         : {self._config.mode.value}
+                workers      : {self._config.worker_count}
+                logs root    : {self._config.logs_root}
+                """
+            ).strip()
+        )
+        if self._last_instruction:
+            typer.echo(f"last instruction: {self._last_instruction}")
+        if show_commands:
+            typer.echo("Commands : /parallel <n>, /mode main|parallel, /resume, /status, /scoreboard, /help, /exit")
 
 
 @app.callback(invoke_without_command=True)

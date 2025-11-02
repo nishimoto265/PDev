@@ -27,6 +27,18 @@ def test_parallel_command_updates_worker_count(manifest_store, tmp_path):
     assert cli._config.mode == SessionMode.MAIN
 
 
+def test_status_command_outputs_information(manifest_store, tmp_path, capsys):
+    cli = InteractiveCLI(
+        orchestrator_builder=lambda **_: Mock(),
+        manifest_store=manifest_store,
+        worktree_root=tmp_path,
+    )
+    cli._handle_command("/status")
+    captured = capsys.readouterr().out
+    assert "tmux session" in captured
+    assert cli._config.tmux_session in captured
+
+
 def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_path):
     logs_root = tmp_path / "logs"
 
