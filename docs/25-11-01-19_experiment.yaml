@@ -84,3 +84,24 @@
   - uv run pytest
   result: tests 19 passed
   notes: 旧ログファイル名との互換性は新テストで保証、logs/ 配下の新命名へ移行
+- date: '2025-11-02'
+  time_utc: '20:35:00'
+  summary: HELLO系サンプルコードを削除
+  details:
+  - HELLO出力用スクリプトとlogging_utilsモジュールを削除し、テスト資産からも除去
+  - サンプルログファイル生成フローを停止し、プロダクト本体コードのみに集中できる構成へ整理
+  reproduce:
+  - uv run pytest
+  result: tests 13 passed
+  notes: サンプル削除後も本体テストは全て成功し、実CLI/サービスへの影響は確認されていない
+- date: '2025-11-02'
+  time_utc: '20:45:00'
+  summary: Orchestrator処理フローを分割リファクタ
+  details:
+  - CycleLayoutデータクラスを導入し、paneとワークツリーの対応関係を保持
+  - run_cycle本体を準備・worker処理・Boss処理・選択/マージの個別メソッドに分割
+  - デバッグ用環境変数による一時停止ロジックを _maybe_pause に集約し重複を削減
+  reproduce:
+  - uv run pytest
+  result: tests 13 passed
+  notes: 既存pytestのモック検証も全て通過し、外部APIとのインターフェース互換性を維持

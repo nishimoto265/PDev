@@ -154,3 +154,24 @@
   - uv run pytest
   result: tests 19 passed
   notes: ログファイル名も`hello_*.log`へ刷新し、各テストで新しい出力を検証済み
+- date: '2025-11-02'
+  time_utc: '20:35:00'
+  summary: HELLOサンプルと付随テストを削除
+  details:
+  - src/parallel_developer配下のHELLO系スクリプトとlogging_utilsを撤去
+  - 対応するpytestテスト群（hello_*_test.py）を削除し、サンプルログ出力資産を整理
+  reproduce:
+  - uv run pytest
+  result: tests 13 passed
+  notes: テスト削除後も本体テストは問題なく通過、今後は実プロダクトコードに専念
+- date: '2025-11-02'
+  time_utc: '20:45:00'
+  summary: Orchestrator.run_cycleを段階処理へ分割
+  details:
+  - CycleLayoutデータクラスを新設し、tmuxレイアウトとワークツリー情報を一元管理
+  - run_cycleをprepare/layout・worker分岐・Boss評価・選択/マージの私有メソッドへ分割し可読性向上
+  - ``PARALLEL_DEV_*`` デバッグ環境変数のチェックを _maybe_pause に集約
+  reproduce:
+  - uv run pytest
+  result: tests 13 passed
+  notes: 既存のpytestモックは期待どおりに呼び出しシーケンスを検証し、リファクタ後も全テスト成功

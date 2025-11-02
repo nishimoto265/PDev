@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
 
 @dataclass(slots=True)
@@ -31,6 +31,18 @@ class SelectionDecision:
     selected_key: str
     scores: Dict[str, float]
     comments: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class CycleLayout:
+    """Resolved tmux layout with worker metadata."""
+
+    main_pane: str
+    boss_pane: str
+    worker_panes: List[str]
+    worker_names: List[str]
+    pane_to_worker: Dict[str, str]
+    pane_to_path: Dict[str, Path]
 
 
 class Orchestrator:
@@ -62,122 +74,33 @@ class Orchestrator:
 
         worker_roots = self._worktree.prepare()
         boss_path = self._worktree.boss_path
-        boss_metrics: Dict[str, Dict[str, Any]] = {}
-
-        baseline = self._monitor.snapshot_rollouts()
-        layout = self._ensure_layout()
-        main_pane = layout["main"]
-        boss_pane = layout["boss"]
-        worker_panes = layout["workers"]
-
-        worker_names = [f"worker-{idx + 1}" for idx in range(len(worker_panes))]
-        pane_to_worker_name = dict(zip(worker_panes, worker_names))
-        pane_to_worker_path: Dict[str, Path] = {}
-        for pane_id, worker_name in pane_to_worker_name.items():
-            if worker_name not in worker_roots:
-                raise RuntimeError(
-                    f"Worktree for {worker_name} not prepared; aborting fork sequence."
-                )
-            pane_to_worker_path[pane_id] = worker_roots[worker_name]
 
         self._tmux.set_boss_path(boss_path)
 
-        self._tmux.launch_main_session(pane_id=main_pane)
-        main_session_id = self._monitor.register_new_rollout(pane_id=main_pane, baseline=baseline)
-
-        user_instruction = instruction.rstrip()
-        formatted_instruction = self._ensure_done_directive(user_instruction)
-
-        self._tmux.send_instruction_to_pane(
-            pane_id=main_pane,
-            instruction=formatted_instruction,
-        )
-        self._tmux.interrupt_pane(pane_id=main_pane)
-
-        self._monitor.capture_instruction(
-            pane_id=main_pane,
-            instruction=formatted_instruction,
+        layout, baseline = self._prepare_layout(worker_roots)
+        main_session_id, formatted_instruction = self._start_main_session(
+            layout=layout,
+            instruction=instruction,
+            baseline=baseline,
         )
 
         baseline = self._monitor.snapshot_rollouts()
-        worker_paths = {pane_id: pane_to_worker_path[pane_id] for pane_id in worker_panes}
-        worker_pane_list = self._tmux.fork_workers(
-            workers=worker_panes,
-            base_session_id=main_session_id,
-            pane_paths=worker_paths,
-        )
-        if os.getenv("PARALLEL_DEV_PAUSE_AFTER_RESUME") == "1":
-            input(
-                "[parallel-dev] Debug pause after worker resume. "
-                "Inspect tmux panes and press Enter to continue..."
-            )
-        fork_map = self._monitor.register_worker_rollouts(
-            worker_panes=worker_pane_list,
+        fork_map = self._fork_worker_sessions(
+            layout=layout,
+            main_session_id=main_session_id,
             baseline=baseline,
         )
-        self._tmux.confirm_workers(fork_map)
 
-        baseline = self._monitor.snapshot_rollouts()
-        self._tmux.fork_boss(
-            pane_id=boss_pane,
-            base_session_id=main_session_id,
-            boss_path=boss_path,
-        )
-        boss_session_id = self._monitor.register_new_rollout(
-            pane_id=boss_pane,
-            baseline=baseline,
-        )
-        self._tmux.prepare_for_instruction(pane_id=boss_pane)
+        completion_info = self._await_worker_completion(fork_map)
 
-        completion_info = self._monitor.await_completion(
-            session_ids=list(fork_map.values())
+        boss_session_id, boss_metrics = self._run_boss_phase(
+            layout=layout,
+            main_session_id=main_session_id,
+            user_instruction=instruction.rstrip(),
+            completion_info=completion_info,
         )
 
-        if os.getenv("PARALLEL_DEV_DEBUG_STATE") == "1":
-            print("[parallel-dev] Worker completion status:", completion_info)
-
-        if os.getenv("PARALLEL_DEV_PAUSE_BEFORE_BOSS") == "1":
-            input(
-                "[parallel-dev] All workers reported completion."
-                " Inspect boss pane, then press Enter to send boss instructions..."
-            )
-
-        boss_instruction = self._build_boss_instruction(worker_names, user_instruction)
-        self._tmux.send_instruction_to_pane(
-            pane_id=boss_pane,
-            instruction=boss_instruction,
-        )
-
-        boss_completion = self._monitor.await_completion(
-            session_ids=[boss_session_id]
-        )
-        completion_info.update(boss_completion)
-        boss_metrics = self._extract_boss_scores(boss_session_id)
-
-        candidates: List[CandidateInfo] = []
-        for pane_id, session_id in fork_map.items():
-            worker_name = pane_to_worker_name[pane_id]
-            branch_name = self._worktree.worker_branch(worker_name)
-            worktree_path = Path(pane_to_worker_path[pane_id])
-            candidates.append(
-                CandidateInfo(
-                    key=worker_name,
-                label=f"{worker_name} (session {session_id})",
-                session_id=session_id,
-                branch=branch_name,
-                worktree=worktree_path,
-            )
-        )
-
-        candidates.append(
-            CandidateInfo(
-                key="boss",
-                label=f"boss (session {boss_session_id})",
-                session_id=boss_session_id,
-                branch=self._worktree.boss_branch,
-                worktree=Path(boss_path),
-            )
-        )
+        candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
 
         decision, scoreboard = self._auto_or_select(
             candidates,
@@ -186,19 +109,8 @@ class Orchestrator:
             boss_metrics,
         )
 
-        candidate_keys = {candidate.key for candidate in candidates}
-        if decision.selected_key not in candidate_keys:
-            raise ValueError(
-                f"Selector returned unknown candidate '{decision.selected_key}'. "
-                f"Known candidates: {sorted(candidate_keys)}"
-            )
-
-        selected_info = next(candidate for candidate in candidates if candidate.key == decision.selected_key)
-        if selected_info.session_id is None:
-            raise RuntimeError("Selected candidate has no session id; cannot resume main session.")
-
-        self._worktree.merge_into_main(selected_info.branch)
-        self._tmux.promote_to_main(session_id=selected_info.session_id, pane_id=main_pane)
+        selected_info = self._validate_selection(decision, candidates)
+        self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
 
         result = OrchestrationResult(
             selected_session=selected_info.session_id,
@@ -207,13 +119,225 @@ class Orchestrator:
 
         self._log.record_cycle(
             instruction=formatted_instruction,
-            layout=layout,
+            layout={
+                "main": layout.main_pane,
+                "boss": layout.boss_pane,
+                "workers": list(layout.worker_panes),
+            },
             fork_map=fork_map,
             completion=completion_info,
             result=result,
         )
 
         return result
+
+    # --------------------------------------------------------------------- #
+    # Layout preparation
+    # --------------------------------------------------------------------- #
+
+    def _prepare_layout(self, worker_roots: Mapping[str, Path]) -> tuple[CycleLayout, Mapping[Path, float]]:
+        baseline = self._monitor.snapshot_rollouts()
+        layout_map = self._ensure_layout()
+        cycle_layout = self._build_cycle_layout(layout_map, worker_roots)
+        return cycle_layout, baseline
+
+    def _build_cycle_layout(
+        self,
+        layout_map: Mapping[str, Any],
+        worker_roots: Mapping[str, Path],
+    ) -> CycleLayout:
+        main_pane = layout_map["main"]
+        boss_pane = layout_map["boss"]
+        worker_panes = list(layout_map["workers"])
+
+        worker_names = [f"worker-{idx + 1}" for idx in range(len(worker_panes))]
+        pane_to_worker = dict(zip(worker_panes, worker_names))
+        pane_to_path: Dict[str, Path] = {}
+
+        for pane_id, worker_name in pane_to_worker.items():
+            if worker_name not in worker_roots:
+                raise RuntimeError(
+                    f"Worktree for {worker_name} not prepared; aborting fork sequence."
+                )
+            pane_to_path[pane_id] = Path(worker_roots[worker_name])
+
+        return CycleLayout(
+            main_pane=main_pane,
+            boss_pane=boss_pane,
+            worker_panes=worker_panes,
+            worker_names=worker_names,
+            pane_to_worker=pane_to_worker,
+            pane_to_path=pane_to_path,
+        )
+
+    def _start_main_session(
+        self,
+        *,
+        layout: CycleLayout,
+        instruction: str,
+        baseline: Mapping[Path, float],
+    ) -> tuple[str, str]:
+        self._tmux.launch_main_session(pane_id=layout.main_pane)
+        main_session_id = self._monitor.register_new_rollout(
+            pane_id=layout.main_pane,
+            baseline=baseline,
+        )
+
+        user_instruction = instruction.rstrip()
+        formatted_instruction = self._ensure_done_directive(user_instruction)
+
+        self._tmux.send_instruction_to_pane(
+            pane_id=layout.main_pane,
+            instruction=formatted_instruction,
+        )
+        self._tmux.interrupt_pane(pane_id=layout.main_pane)
+        self._monitor.capture_instruction(
+            pane_id=layout.main_pane,
+            instruction=formatted_instruction,
+        )
+        return main_session_id, formatted_instruction
+
+    # --------------------------------------------------------------------- #
+    # Worker handling
+    # --------------------------------------------------------------------- #
+
+    def _fork_worker_sessions(
+        self,
+        *,
+        layout: CycleLayout,
+        main_session_id: str,
+        baseline: Mapping[Path, float],
+    ) -> Dict[str, str]:
+        worker_paths = {pane_id: layout.pane_to_path[pane_id] for pane_id in layout.worker_panes}
+        worker_pane_list = self._tmux.fork_workers(
+            workers=layout.worker_panes,
+            base_session_id=main_session_id,
+            pane_paths=worker_paths,
+        )
+        self._maybe_pause(
+            "PARALLEL_DEV_PAUSE_AFTER_RESUME",
+            "[parallel-dev] Debug pause after worker resume. Inspect tmux panes and press Enter to continue...",
+        )
+        fork_map = self._monitor.register_worker_rollouts(
+            worker_panes=worker_pane_list,
+            baseline=baseline,
+        )
+        self._tmux.confirm_workers(fork_map)
+        return fork_map
+
+    def _await_worker_completion(self, fork_map: Mapping[str, str]) -> Dict[str, Any]:
+        completion_info = self._monitor.await_completion(
+            session_ids=list(fork_map.values())
+        )
+        if os.getenv("PARALLEL_DEV_DEBUG_STATE") == "1":
+            print("[parallel-dev] Worker completion status:", completion_info)
+        return completion_info
+
+    # --------------------------------------------------------------------- #
+    # Boss handling
+    # --------------------------------------------------------------------- #
+
+    def _run_boss_phase(
+        self,
+        *,
+        layout: CycleLayout,
+        main_session_id: str,
+        user_instruction: str,
+        completion_info: Dict[str, Any],
+    ) -> tuple[str, Dict[str, Dict[str, Any]]]:
+        baseline = self._monitor.snapshot_rollouts()
+        self._tmux.fork_boss(
+            pane_id=layout.boss_pane,
+            base_session_id=main_session_id,
+            boss_path=self._worktree.boss_path,
+        )
+        boss_session_id = self._monitor.register_new_rollout(
+            pane_id=layout.boss_pane,
+            baseline=baseline,
+        )
+        self._tmux.prepare_for_instruction(pane_id=layout.boss_pane)
+
+        self._maybe_pause(
+            "PARALLEL_DEV_PAUSE_BEFORE_BOSS",
+            "[parallel-dev] All workers reported completion. Inspect boss pane, then press Enter to send boss instructions...",
+        )
+
+        boss_instruction = self._build_boss_instruction(layout.worker_names, user_instruction)
+        self._tmux.send_instruction_to_pane(
+            pane_id=layout.boss_pane,
+            instruction=boss_instruction,
+        )
+
+        boss_completion = self._monitor.await_completion(session_ids=[boss_session_id])
+        completion_info.update(boss_completion)
+        boss_metrics = self._extract_boss_scores(boss_session_id)
+        return boss_session_id, boss_metrics
+
+    # --------------------------------------------------------------------- #
+    # Candidate selection
+    # --------------------------------------------------------------------- #
+
+    def _build_candidates(
+        self,
+        layout: CycleLayout,
+        fork_map: Mapping[str, str],
+        boss_session_id: str,
+        boss_path: Path,
+    ) -> List[CandidateInfo]:
+        candidates: List[CandidateInfo] = []
+        for pane_id, session_id in fork_map.items():
+            worker_name = layout.pane_to_worker[pane_id]
+            branch_name = self._worktree.worker_branch(worker_name)
+            worktree_path = layout.pane_to_path[pane_id]
+            candidates.append(
+                CandidateInfo(
+                    key=worker_name,
+                    label=f"{worker_name} (session {session_id})",
+                    session_id=session_id,
+                    branch=branch_name,
+                    worktree=worktree_path,
+                )
+            )
+
+        candidates.append(
+            CandidateInfo(
+                key="boss",
+                label=f"boss (session {boss_session_id})",
+                session_id=boss_session_id,
+                branch=self._worktree.boss_branch,
+                worktree=boss_path,
+            )
+        )
+        return candidates
+
+    def _validate_selection(
+        self,
+        decision: SelectionDecision,
+        candidates: Iterable[CandidateInfo],
+    ) -> CandidateInfo:
+        candidate_map = {candidate.key: candidate for candidate in candidates}
+        if decision.selected_key not in candidate_map:
+            raise ValueError(
+                f"Selector returned unknown candidate '{decision.selected_key}'. "
+                f"Known candidates: {sorted(candidate_map)}"
+            )
+        selected_info = candidate_map[decision.selected_key]
+        if selected_info.session_id is None:
+            raise RuntimeError("Selected candidate has no session id; cannot resume main session.")
+        return selected_info
+
+    def _finalize_selection(
+        self,
+        *,
+        selected: CandidateInfo,
+        main_pane: str,
+    ) -> None:
+        self._worktree.merge_into_main(selected.branch)
+        self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
+
+    # --------------------------------------------------------------------- #
+    # Existing helper utilities
+    # --------------------------------------------------------------------- #
 
     def _ensure_layout(self) -> MutableMapping[str, Any]:
         layout = self._tmux.ensure_layout(
@@ -371,3 +495,7 @@ class Orchestrator:
             "    ... other candidates ...\n  }\n}\n"
             "Only output the JSON object. After that, send /done."
         )
+
+    def _maybe_pause(self, env_var: str, message: str) -> None:
+        if os.getenv(env_var) == "1":
+            input(message)
