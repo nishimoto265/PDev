@@ -18,6 +18,7 @@ from subprocess import PIPE
 
 from textual import events
 from textual.app import App, ComposeResult
+from rich.text import Text
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Footer, Header, Input, OptionList, RichLog, Static
@@ -202,27 +203,33 @@ class CommandPalette(Static):
         self.display = False
         self._items: List[PaletteItem] = []
         self._active_index: int = 0
-        self.update("")
+        self._renderable: Text = Text()
 
     def set_items(self, items: List[PaletteItem]) -> None:
         self._items = items
         self._active_index = 0
         if not items:
             self.display = False
-            self.update("")
+            self._renderable = Text()
             return
         self.display = True
         self._render()
 
     def _render(self) -> None:
         if not self._items:
-            self.update("")
+            self._renderable = Text()
             return
-        lines = []
+        lines: List[Text] = []
         for idx, item in enumerate(self._items):
             prefix = "▶ " if idx == self._active_index else "  "
-            lines.append(f"{prefix}{item.label}")
-        self.update("\n".join(lines))
+            style = "bold yellow" if idx == self._active_index else ""
+            lines.append(Text(prefix + item.label, style=style))
+        combined = Text()
+        for idx, segment in enumerate(lines):
+            if idx:
+                combined.append("\n")
+            combined.append(segment)
+        self._renderable = combined
 
     def move_next(self) -> None:
         if not self._items:
@@ -240,6 +247,9 @@ class CommandPalette(Static):
         if not self._items:
             return None
         return self._items[self._active_index]
+
+    def render(self) -> Text:
+        return self._renderable
 
 
 class CLIController:
