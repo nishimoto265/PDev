@@ -111,3 +111,14 @@
   - uv run pytest
   result: tests 17 passed
   notes: logs/25-11-02-10_hello_stdout.logにhello_stdout_script_start〜completeを記録
+- date: '2025-11-02'
+  time_utc: '01:28:39'
+  summary: HELLO標準出力スクリプトを新規追加
+  details:
+  - 失敗するpytest tests/25-11-02-10_test_hello.pyを先に作成し、HELLO標準出力を検証
+  - src/25-11-02-10_hello.pyで詳細なDEBUGログとHELLO標準出力を実装
+  - ログがlogs/25-11-02-10_hello.logに記録されることを確認
+  reproduce:
+  - uv run pytest tests/25-11-02-10_test_hello.py
+  result: tests 1 passed
+  notes: 既存uv環境を再利用し、HELLO以外の標準出力は行わない
