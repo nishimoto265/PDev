@@ -32,12 +32,12 @@ def _configure_logger() -> logging.Logger:
 
 def main() -> int:
     logger = _configure_logger()
-    logger.debug("Starting HELLO script run")
+    logger.debug("hello_script_start")
 
     message = "HELLO"
     print(message)
 
-    logger.debug("Completed HELLO script run")
+    logger.debug("hello_script_complete")
     return 0
 
 

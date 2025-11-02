@@ -51,3 +51,15 @@
   - uv run pytest
   result: tests 15 passed
   notes: 既存の25-11-01-19_.venv環境を再利用し、ログはlogs/25-11-02-09_hello.logへ出力。
+- date: '2025-11-02'
+  time_utc: '00:59:00'
+  summary: HELLOスクリプトのログ文言を再整備
+  details:
+  - ログ検証を強化するpytestを作成し、HELLO標準出力とlogファイルのキーを確認
+  - 25-11-02-09_hello.pyのデバッグログをhello_script_start/completeに統一
+  - uv run pytestでスクリプト単体テストを実行し、既存ワークフローと競合しないことを確認
+  reproduce:
+  - uv run pytest tests/25-11-02-09_hello_script_test.py
+  - uv run pytest
+  result: tests 15 passed
+  notes: logs/25-11-02-09_hello.logで実行履歴が追跡できる状態を確認

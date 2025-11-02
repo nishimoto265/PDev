@@ -21,7 +21,7 @@ def test_hello_script_prints_and_logs():
     assert result.returncode == 0, f"Script failed: {result.stderr}"
     assert result.stdout == "HELLO\n"
 
-    assert log_path.exists(), "Log file was not created"
-    log_content = log_path.read_text()
-    assert "Starting HELLO script run" in log_content
-    assert "Completed HELLO script run" in log_content
+    assert log_path.exists(), "Expected log file was not created."
+    log_content = log_path.read_text(encoding="utf-8")
+    assert "hello_script_start" in log_content
+    assert "hello_script_complete" in log_content
