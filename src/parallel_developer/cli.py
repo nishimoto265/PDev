@@ -14,7 +14,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Footer, Header, Input, OptionList, RichLog, Static
 
 from .orchestrator import CandidateInfo, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
@@ -64,27 +64,6 @@ class StatusPanel(Static):
             f"status       : {message}",
         ]
         self.update("\n".join(lines))
-
-
-class ScoreboardPanel(RichLog):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, highlight=True, markup=True, **kwargs)
-        self.write("スコアボードはここに表示されます。")
-
-    def show_scoreboard(self, scoreboard: Dict[str, Dict[str, object]]) -> None:
-        self.clear()
-        if not scoreboard:
-            self.write("スコアボード情報はありません。")
-            return
-        for key, data in sorted(
-            scoreboard.items(),
-            key=lambda item: (item[1].get("score") is None, -(item[1].get("score") or 0.0)),
-        ):
-            score = data.get("score")
-            comment = data.get("comment", "")
-            selected = " [selected]" if data.get("selected") else ""
-            score_text = "-" if score is None else f"{score:.2f}"
-            self.write(f"{key:>10}: {score_text}{selected} {comment}")
 
 
 class EventLog(RichLog):
@@ -284,6 +263,7 @@ class CLIController:
         context.future.set_result(decision)
         self._emit("log", {"text": f"{candidate.label} を選択しました。"})
         self._selection_context = None
+        self._emit("selection_finished", {})
 
     def _list_sessions(self) -> None:
         references = self._manifest_store.list_sessions()
@@ -561,7 +541,7 @@ class ParallelDeveloperApp(App):
         super().__init__()
         self.status_panel: Optional[StatusPanel] = None
         self.log_panel: Optional[EventLog] = None
-        self.scoreboard_panel: Optional[ScoreboardPanel] = None
+        self.selection_list: Optional[OptionList] = None
         self.command_input: Optional[Input] = None
         self.controller = CLIController(
             event_handler=self._handle_controller_event,
@@ -578,9 +558,10 @@ class ParallelDeveloperApp(App):
                 yield self.status_panel
                 with Horizontal():
                     self.log_panel = EventLog(id="log", max_lines=200)
-                    self.scoreboard_panel = ScoreboardPanel(id="scoreboard", max_lines=200)
                     yield self.log_panel
-                    yield self.scoreboard_panel
+                    self.selection_list = OptionList(id="selection")
+                    self.selection_list.display = False
+                    yield self.selection_list
                 hint = CommandHint(id="hint")
                 hint.update_hint()
                 yield hint
@@ -590,13 +571,13 @@ class ParallelDeveloperApp(App):
 
     async def on_mount(self) -> None:
         if self.command_input:
-            await self.command_input.focus()
+            self.command_input.focus()
         self._post_event("status", {"message": "待機中"})
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_input_submitted(self, event: Input.Submitted) -> None:
         if self.command_input:
             self.command_input.value = ""
-        await self.controller.handle_input(event.value)
+        asyncio.create_task(self.controller.handle_input(event.value))
 
     def _handle_controller_event(self, event_type: str, payload: Dict[str, object]) -> None:
         def _post() -> None:
@@ -618,25 +599,70 @@ class ParallelDeveloperApp(App):
         elif event.event_type == "log" and self.log_panel:
             text = str(event.payload.get("text", ""))
             self.log_panel.log(text)
-        elif event.event_type == "scoreboard" and self.scoreboard_panel:
+        elif event.event_type == "scoreboard":
             scoreboard = event.payload.get("scoreboard", {})
             if isinstance(scoreboard, dict):
-                self.scoreboard_panel.show_scoreboard(scoreboard)
+                self._render_scoreboard(scoreboard)
         elif event.event_type == "selection_request":
             candidates = event.payload.get("candidates", [])
             scoreboard = event.payload.get("scoreboard", {})
-            if isinstance(scoreboard, dict) and self.scoreboard_panel:
-                self.scoreboard_panel.show_scoreboard(scoreboard)
-            if self.log_panel:
-                lines = ["=== 候補が出そろいました ==="]
-                lines.extend(str(line) for line in candidates)
-                lines.append("番号を入力して /pick <番号> で選択してください。")
-                self.log_panel.log("\n".join(lines))
+            self._render_scoreboard(scoreboard)
+            if self.selection_list:
+                self.selection_list.clear_options()
+                for idx, candidate_label in enumerate(candidates, start=1):
+                    option_text = self._build_option_label(candidate_label, scoreboard)
+                    self.selection_list.add_option(option_text, id=str(idx))
+                self.selection_list.display = True
+                self.selection_list.focus()
+            if self.command_input:
+                self.command_input.display = False
+        elif event.event_type == "selection_finished":
+            if self.selection_list:
+                self.selection_list.display = False
+            if self.command_input:
+                self.command_input.display = True
+                self.command_input.focus()
         elif event.event_type == "quit":
             self.exit()
 
     async def action_quit(self) -> None:  # type: ignore[override]
         self.exit()
+
+    def _render_scoreboard(self, scoreboard: Dict[str, Dict[str, object]]) -> None:
+        if not self.log_panel:
+            return
+        if not scoreboard:
+            self.log_panel.log("スコアボード情報はありません。")
+            return
+        lines = ["=== スコアボード ==="]
+        for key, data in sorted(
+            scoreboard.items(),
+            key=lambda item: (item[1].get("score") is None, -(item[1].get("score") or 0.0)),
+        ):
+            score = data.get("score")
+            comment = data.get("comment", "")
+            selected = " [selected]" if data.get("selected") else ""
+            score_text = "-" if score is None else f"{score:.2f}"
+            lines.append(f"{key:>10}: {score_text}{selected} {comment}")
+        self.log_panel.log("\n".join(lines))
+
+    def _build_option_label(self, candidate_label: str, scoreboard: Dict[str, Dict[str, object]]) -> str:
+        label_body = candidate_label.split(". ", 1)[1] if ". " in candidate_label else candidate_label
+        key = label_body.split(" (", 1)[0].strip()
+        entry = scoreboard.get(key, {})
+        score = entry.get("score")
+        comment = entry.get("comment", "")
+        score_text = "-" if score is None else f"{score:.2f}"
+        if comment:
+            return f"{label_body} • {score_text} • {comment}"
+        return f"{label_body} • {score_text}"
+
+    async def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        try:
+            index = int(event.option_id)
+        except (TypeError, ValueError):
+            return
+        await self.controller.handle_input(f"/pick {index}")
 
 
 def build_orchestrator(
