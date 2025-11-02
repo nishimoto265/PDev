@@ -30,6 +30,7 @@ class SessionManifest:
     latest_instruction: Optional[str] = None
     scoreboard: Dict[str, Dict[str, object]] = field(default_factory=dict)
     conversation_log: Optional[str] = None
+    selected_session_id: Optional[str] = None
     main: PaneRecord = field(default_factory=lambda: PaneRecord(role="main", name=None, session_id=""))
     boss: Optional[PaneRecord] = None
     workers: Dict[str, PaneRecord] = field(default_factory=dict)
@@ -45,6 +46,7 @@ class SessionManifest:
             "latest_instruction": self.latest_instruction,
             "scoreboard": self.scoreboard,
             "conversation_log": self.conversation_log,
+            "selected_session_id": self.selected_session_id,
             "main": asdict(self.main),
             "boss": asdict(self.boss) if self.boss else None,
             "workers": {name: asdict(record) for name, record in self.workers.items()},
@@ -67,6 +69,7 @@ class SessionManifest:
             latest_instruction=data.get("latest_instruction"),
             scoreboard=data.get("scoreboard", {}) or {},
             conversation_log=data.get("conversation_log"),
+            selected_session_id=data.get("selected_session_id"),
             main=PaneRecord(**data.get("main", {})),
             boss=PaneRecord(**boss_data) if boss_data else None,
             workers=workers,

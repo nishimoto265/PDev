@@ -104,6 +104,7 @@ class CLIController:
         self._running: bool = False
         self._selection_context: Optional[SelectionContext] = None
         self._resume_options: List[SessionReference] = []
+        self._last_selected_session: Optional[str] = None
 
     async def handle_input(self, user_input: str) -> None:
         text = user_input.strip()
@@ -226,14 +227,21 @@ class CLIController:
             )
             return future.result()
 
+        resume_session = self._last_selected_session
+
         def run_cycle() -> OrchestrationResult:
-            return orchestrator.run_cycle(instruction, selector=selector)
+            return orchestrator.run_cycle(
+                instruction,
+                selector=selector,
+                resume_session_id=resume_session,
+            )
 
         try:
             self._emit("log", {"text": f"指示を開始: {instruction}"})
             result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
             self._last_scoreboard = dict(result.sessions_summary)
             self._last_instruction = instruction
+            self._last_selected_session = result.selected_session
             self._config.reuse_existing_session = True
             self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
             self._emit("log", {"text": "指示が完了しました。"})
@@ -313,6 +321,7 @@ class CLIController:
         self._config.reuse_existing_session = True
         self._last_scoreboard = manifest.scoreboard or {}
         self._last_instruction = manifest.latest_instruction
+        self._last_selected_session = manifest.selected_session_id
         self._emit_status("再開準備完了")
         self._ensure_tmux_session(manifest)
 
@@ -478,6 +487,7 @@ class CLIController:
             latest_instruction=self._last_instruction,
             scoreboard=self._last_scoreboard,
             conversation_log=conversation_path,
+            selected_session_id=artifact.selected_session_id,
             main=main_record,
             boss=boss_record,
             workers=workers,

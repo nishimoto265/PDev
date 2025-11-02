@@ -219,6 +219,8 @@ class WorktreeManager:
         self.boss_path = self.root / ".parallel-dev" / "boss"
         self._worker_branch_template = "parallel-dev/{name}"
         self._boss_branch = "parallel-dev/boss"
+        self._initialized = False
+        self._worker_paths: Dict[str, Path] = {}
 
     def prepare(self) -> Dict[str, Path]:
         self.worktrees_dir.mkdir(parents=True, exist_ok=True)
@@ -227,9 +229,23 @@ class WorktreeManager:
             worker_name = f"worker-{index}"
             worktree_path = self.worktrees_dir / worker_name
             branch_name = self.worker_branch(worker_name)
-            self._recreate_worktree(worktree_path, branch_name)
+            if not self._initialized or worker_name not in self._worker_paths:
+                self._recreate_worktree(worktree_path, branch_name)
+            else:
+                self._reset_worktree(worktree_path)
             mapping[worker_name] = worktree_path
-        self._recreate_worktree(self.boss_path, self.boss_branch)
+        if self._initialized:
+            existing = set(self._worker_paths)
+            target = set(mapping)
+            for obsolete in existing - target:
+                self._remove_worktree(self.worktrees_dir / obsolete)
+
+        if not self._initialized:
+            self._recreate_worktree(self.boss_path, self.boss_branch)
+        else:
+            self._reset_worktree(self.boss_path)
+        self._worker_paths = mapping
+        self._initialized = True
         return mapping
 
     def _ensure_repo_initialized(self) -> None:
@@ -255,6 +271,23 @@ class WorktreeManager:
             str(path),
             "HEAD",
         )
+
+    def _reset_worktree(self, path: Path) -> None:
+        if not path.exists():
+            return
+        repo = git.Repo(path)
+        repo.git.reset("--hard", "HEAD")
+        repo.git.clean("-fdx")
+
+    def _remove_worktree(self, path: Path) -> None:
+        if not path.exists():
+            return
+        try:
+            self._repo.git.worktree("remove", "--force", str(path))
+        except git.GitCommandError:
+            shutil.rmtree(path, ignore_errors=True)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
 
     def worker_branch(self, worker_name: str) -> str:
         return self._worker_branch_template.format(name=worker_name)

@@ -56,6 +56,7 @@ class CycleArtifact:
     instruction: str
     tmux_session: str
     log_paths: Dict[str, Path] = field(default_factory=dict)
+    selected_session_id: Optional[str] = None
 
 
 class Orchestrator:
@@ -82,6 +83,7 @@ class Orchestrator:
         self,
         instruction: str,
         selector: Optional[Callable[[List[CandidateInfo]], SelectionDecision]] = None,
+        resume_session_id: Optional[str] = None,
     ) -> OrchestrationResult:
         """Execute a single orchestrated instruction cycle."""
 
@@ -95,6 +97,7 @@ class Orchestrator:
             layout=layout,
             instruction=instruction,
             baseline=baseline,
+            resume_session_id=resume_session_id,
         )
 
         baseline = self._monitor.snapshot_rollouts()
@@ -162,6 +165,7 @@ class Orchestrator:
                 result=result,
             )
             artifact.log_paths = log_paths
+            artifact.selected_session_id = main_session_id
             return result
 
         decision, scoreboard = self._auto_or_select(
@@ -173,6 +177,7 @@ class Orchestrator:
 
         selected_info = self._validate_selection(decision, candidates)
         self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
+        artifact.selected_session_id = selected_info.session_id
 
         result = OrchestrationResult(
             selected_session=selected_info.session_id,
@@ -240,8 +245,16 @@ class Orchestrator:
         layout: CycleLayout,
         instruction: str,
         baseline: Mapping[Path, float],
+        resume_session_id: Optional[str],
     ) -> tuple[str, str]:
-        self._tmux.launch_main_session(pane_id=layout.main_pane)
+        if resume_session_id:
+            self._tmux.resume_session(
+                pane_id=layout.main_pane,
+                workdir=self._worktree.root,
+                session_id=resume_session_id,
+            )
+        else:
+            self._tmux.launch_main_session(pane_id=layout.main_pane)
         main_session_id = self._monitor.register_new_rollout(
             pane_id=layout.main_pane,
             baseline=baseline,

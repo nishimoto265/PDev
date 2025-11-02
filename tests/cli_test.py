@@ -76,6 +76,7 @@ def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_
         instruction="",
         tmux_session="parallel-dev-test",
     )
+    artifact.selected_session_id = "session-main"
     orchestrator = Mock()
     orchestrator.run_cycle.return_value = OrchestrationResult(
         selected_session="session-main",
@@ -113,3 +114,4 @@ def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_
     assert manifest.conversation_log.endswith(".jsonl")
     conversation_path = Path(manifest.conversation_log)
     assert conversation_path.exists()
+    assert controller._last_selected_session == "session-main"
