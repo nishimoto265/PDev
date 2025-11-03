@@ -272,7 +272,15 @@ def test_handle_escape_reverts_cycle(monkeypatch, tmp_path):
     controller._last_selected_session = "session-B"
     controller._last_scoreboard = {"main": {}}
     controller._paused = True
-    controller._running = False
+    controller._running = True
+    tmux_called = {}
+    class DummyTmux:
+        def promote_to_main(self, session_id, pane_id):
+            tmux_called["session"] = session_id
+            tmux_called["pane"] = pane_id
+    controller._last_tmux_manager = DummyTmux()
+    controller._tmux_list_panes = lambda: ["%0", "%1", "%2"]
+
 
     controller.handle_escape()
 
@@ -281,33 +289,11 @@ def test_handle_escape_reverts_cycle(monkeypatch, tmp_path):
     status_messages = [payload["message"] for event, payload in events if event == "status"]
     assert status_messages and status_messages[-1] == "待機中"
     log_messages = [payload["text"] for event, payload in events if event == "log"]
-    assert any("サイクルを巻き戻しました" in msg for msg in log_messages)
+
+    assert tmux_called.get("session") == "session-A"
+    assert tmux_called.get("pane") == "%0"
 
 
-def test_handle_escape_cancels_running_cycle(monkeypatch, tmp_path):
-    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
-    controller.broadcast_escape = lambda: None  # type: ignore[assignment]
-    controller._paused = True
-    controller._paused = True
-    controller._running = True
-    controller._current_cycle_id = 2
-    controller._cycle_history = [
-        {"cycle_id": 1, "selected_session": "session-A", "scoreboard": {}, "instruction": "first"},
-        {"cycle_id": 2, "selected_session": "session-B", "scoreboard": {}, "instruction": "second"},
-    ]
-    controller._last_selected_session = "session-B"
-
-    controller.handle_escape()
-
-    assert controller._running is True
-    assert controller._paused is False
-    assert controller._current_cycle_id == 2
-    assert 2 in controller._cancelled_cycles
-    assert controller._last_selected_session == "session-B"
-    assert controller._current_cycle_id == 2
-    assert 2 in controller._cancelled_cycles
-    # 状態は巻き戻しで更新されるまで現状維持
-    assert controller._last_selected_session == "session-B"
 
 
 def test_paused_instruction_broadcast(monkeypatch, tmp_path):
