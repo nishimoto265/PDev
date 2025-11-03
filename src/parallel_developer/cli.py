@@ -7,6 +7,7 @@ import json
 from concurrent.futures import Future
 import importlib.util
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -199,6 +200,8 @@ class CLIController:
         self._active_main_session_id: Optional[str] = None
         self._paused: bool = False
         self._cycle_history: List[Dict[str, object]] = []
+        self._input_history: List[str] = []
+        self._history_cursor: int = 0
         self._cycle_counter: int = 0
         self._current_cycle_id: Optional[int] = None
         self._cancelled_cycles: Set[int] = set()
@@ -253,9 +256,11 @@ class CLIController:
         if not text:
             return
         if text.startswith("/"):
+            self._record_history(text)
             await self._execute_text_command(text)
             return
         if self._paused:
+            self._record_history(text)
             await self._dispatch_paused_instruction(text)
             return
         if self._running:
@@ -266,6 +271,7 @@ class CLIController:
         if self._running:
             self._emit("log", {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
             return
+        self._record_history(text)
         await self._run_instruction(text)
 
     async def _execute_text_command(self, command_text: str) -> None:
@@ -527,6 +533,35 @@ class CLIController:
             "instruction": self._last_instruction,
         }
         self._cycle_history.append(snapshot)
+
+    def _record_history(self, text: str) -> None:
+        entry = text.strip()
+        if not entry:
+            return
+        if self._input_history and self._input_history[-1] == entry:
+            self._history_cursor = len(self._input_history)
+            return
+        self._input_history.append(entry)
+        self._history_cursor = len(self._input_history)
+
+    def history_previous(self) -> Optional[str]:
+        if not self._input_history:
+            return None
+        if self._history_cursor > 0:
+            self._history_cursor -= 1
+        return self._input_history[self._history_cursor]
+
+    def history_next(self) -> Optional[str]:
+        if not self._input_history:
+            return None
+        if self._history_cursor < len(self._input_history) - 1:
+            self._history_cursor += 1
+            return self._input_history[self._history_cursor]
+        self._history_cursor = len(self._input_history)
+        return ""
+
+    def history_reset(self) -> None:
+        self._history_cursor = len(self._input_history)
 
     def _perform_revert(self, silent: bool = False) -> None:
         tmux_manager = self._last_tmux_manager
@@ -1081,7 +1116,6 @@ class ParallelDeveloperApp(App):
     """
 
     BINDINGS = [
-        ("ctrl+c", "quit", "終了"),
         ("ctrl+q", "quit", "終了"),
         ("escape", "close_palette", "一時停止/巻き戻し"),
         ("tab", "palette_next", "次候補"),
@@ -1102,6 +1136,9 @@ class ParallelDeveloperApp(App):
         self._pending_command: Optional[str] = None
         self._default_placeholder: str = "指示または /コマンド"
         self._paused_placeholder: str = "一時停止中: ワーカーへの追加指示を入力"
+        self._ctrl_c_armed: bool = False
+        self._ctrl_c_armed_at: float = 0.0
+        self._ctrl_c_timeout: float = 2.0
         self.controller = CLIController(
             event_handler=self._handle_controller_event,
             manifest_store=ManifestStore(),
@@ -1159,6 +1196,7 @@ class ParallelDeveloperApp(App):
             return
         self._hide_command_palette()
         self._set_command_text("")
+        self._ctrl_c_armed = False
         asyncio.create_task(self.controller.handle_input(value.rstrip("\n")))
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -1166,6 +1204,7 @@ class ParallelDeveloperApp(App):
             return
         if self._suppress_command_change:
             return
+        self.controller.history_reset()
         value = self.command_input.text
         if value == self._last_command_text:
             return
@@ -1281,6 +1320,27 @@ class ParallelDeveloperApp(App):
 
     async def action_quit(self) -> None:  # type: ignore[override]
         self.exit()
+
+    def _handle_ctrl_c(self, event: events.Key) -> bool:
+        key = (event.key or "").lower()
+        name = (event.name or "").lower()
+        if key not in {"ctrl+c", "control+c"} and name not in {"ctrl+c", "control+c"}:
+            return False
+        event.stop()
+        now = time.monotonic()
+        if self._ctrl_c_armed and now - self._ctrl_c_armed_at <= self._ctrl_c_timeout:
+            self._ctrl_c_armed = False
+            self.exit()
+            return True
+
+        self._ctrl_c_armed = True
+        self._ctrl_c_armed_at = now
+        if self.command_input:
+            self._set_command_text("")
+            self.command_input.action_cursor_end()
+        self.controller.history_reset()
+        self._notify_status("Ctrl+C をもう一度押すと終了します。", also_log=False)
+        return True
 
     def _render_scoreboard(self, scoreboard: Dict[str, Dict[str, object]]) -> None:
         if not self.log_panel:
@@ -1410,6 +1470,8 @@ class ParallelDeveloperApp(App):
             self.log_panel.log(message)
 
     def on_key(self, event: events.Key) -> None:
+        if self._handle_ctrl_c(event):
+            return
         if self._handle_text_shortcuts(event):
             return
         if self.command_palette and self.command_palette.display:
@@ -1456,6 +1518,15 @@ class ParallelDeveloperApp(App):
             if name_value and name_value in {shortcut.replace("+", "_") for shortcut in shortcuts}:
                 return True
             return False
+
+        if event.key in {"up", "down"} and not (self.command_palette and self.command_palette.display):
+            history_text = self.controller.history_previous() if event.key == "up" else self.controller.history_next()
+            if history_text is not None:
+                if self.command_input:
+                    self._set_command_text(history_text)
+                    self.command_input.action_cursor_end()
+                event.stop()
+                return True
 
         if matches(shortcuts_select_all):
             if self.log_panel:

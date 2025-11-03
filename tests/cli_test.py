@@ -343,6 +343,28 @@ def test_on_main_session_started_sets_reuse_flag(tmp_path):
     assert controller._config.reuse_existing_session is True
 
 
+def test_history_navigation(tmp_path):
+    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
+
+    controller._record_history("first")
+    controller._record_history("second")
+    controller._record_history("second")  # duplicate ignored
+    controller._record_history("third")
+
+    assert controller.history_previous() == "third"
+    assert controller.history_previous() == "second"
+    assert controller.history_previous() == "first"
+    assert controller.history_previous() == "first"  # stays at oldest
+
+    assert controller.history_next() == "second"
+    assert controller.history_next() == "third"
+    assert controller.history_next() == ""
+    assert controller.history_next() == ""
+
+    controller.history_reset()
+    assert controller.history_next() == ""
+
+
 def test_paused_instruction_broadcast(monkeypatch, tmp_path):
     events = []
 
