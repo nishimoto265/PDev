@@ -292,3 +292,14 @@
   - uv run pytest
   result: tests 46 passed
   notes: controller本体は今後のフェーズで分割予定。UIコンポーネントの独立により再利用とテストの見通しが向上
+- date: '2025-11-03'
+  time_utc: '05:45:00'
+  summary: ESCキーで全tmuxペインへESC送信する処理を追加
+  details:
+  - CLIControllerにbroadcast_escapeを実装し、tmux list-panes/send-keysで各ペインへEscapeを送信
+  - TextualアプリのESCバインディングでcontroller.broadcast_escapeを呼ぶよう拡張
+  - CLI/ UIテストを追加し、tmux送信コマンドが呼ばれることとESCがUI経由で発火することを検証
+  reproduce:
+  - uv run pytest
+  result: tests 48 passed
+  notes: ショートカット操作で直接tmux側の解除が可能になり、手動でのESC入力が不要に

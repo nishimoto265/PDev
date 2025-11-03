@@ -223,6 +223,25 @@ async def test_shift_then_enter_inserts_newline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_escape_broadcasts_to_tmux(monkeypatch) -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        called = {
+            "value": False,
+        }
+
+        def fake_broadcast() -> None:
+            called["value"] = True
+
+        app.controller.broadcast_escape = fake_broadcast  # type: ignore[assignment]
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert called["value"] is True
+
+@pytest.mark.asyncio
 async def test_shift_enter_combo_inserts_newline() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]

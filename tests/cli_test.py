@@ -211,6 +211,31 @@ def test_tmux_attach_manager_linux_fallback(monkeypatch, tmp_path):
     assert commands[-1][2] == expected_cmd
 
 
+def test_controller_broadcast_escape(monkeypatch, tmp_path):
+    events = []
+
+    def handler(event_type, payload):
+        events.append((event_type, payload))
+
+    controller = CLIController(event_handler=handler, worktree_root=tmp_path)
+
+    recorded: list[list[str]] = []
+
+    def fake_run(command, check=False, stdout=None, stderr=None, text=None):
+        recorded.append(command)
+        if "list-panes" in command:
+            return SimpleNamespace(returncode=0, stdout="%0\n%1\n", stderr="")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    controller.broadcast_escape()
+
+    expected_prefix = ["tmux", "list-panes", "-t", controller._config.tmux_session, "-F", "#{pane_id}"]
+    assert recorded[0] == expected_prefix
+    assert ["tmux", "send-keys", "-t", "%0", "Escape"] in recorded
+    assert ["tmux", "send-keys", "-t", "%1", "Escape"] in recorded
+
 def test_attach_auto_mode_skips_when_already_attached(monkeypatch, manifest_store, tmp_path):
     events = []
 

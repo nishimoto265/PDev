@@ -405,6 +405,33 @@ class CLIController:
                 return idx
         return None
 
+    def broadcast_escape(self) -> None:
+        session_name = self._config.tmux_session
+        try:
+            result = subprocess.run(
+                ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"],
+                check=False,
+                stdout=PIPE,
+                stderr=PIPE,
+                text=True,
+            )
+        except FileNotFoundError:
+            self._emit("log", {"text": "tmux コマンドが見つかりません。tmuxがインストールされているか確認してください。"})
+            return
+
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout or "").strip()
+            if message:
+                self._emit("log", {"text": f"tmux list-panes に失敗しました: {message}"})
+            return
+
+        pane_ids = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        for pane_id in pane_ids:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_id, "Escape"],
+                check=False,
+            )
+
     async def _run_instruction(self, instruction: str) -> None:
         if self._running:
             self._emit("log", {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
@@ -1099,6 +1126,7 @@ class ParallelDeveloperApp(App):
 
     def action_close_palette(self) -> None:
         self._hide_command_palette()
+        self.controller.broadcast_escape()
 
     def action_palette_next(self) -> None:
         if self.command_palette and self.command_palette.display:
