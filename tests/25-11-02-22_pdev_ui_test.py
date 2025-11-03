@@ -164,3 +164,63 @@ async def test_shift_enter_inserts_newline() -> None:
         await pilot.pause()
         assert app.command_input.text == "line1\nline2"
         assert submitted == []
+
+
+@pytest.mark.asyncio
+async def test_shift_enter_from_key_name() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        assert app.command_input is not None
+        submitted: list[str] = []
+
+        async def _capture_input(value: str) -> None:
+            submitted.append(value)
+
+        original_handle_input = app.controller.handle_input
+
+        async def handle_input_override(value: str):
+            await _capture_input(value)
+            await original_handle_input(value)
+
+        app.controller.handle_input = handle_input_override  # type: ignore[assignment]
+        await pilot.pause()
+        fake_event = events.Key("enter", "\r")
+        fake_event.aliases.append("shift+enter")
+        await app.command_input._on_key(fake_event)  # type: ignore[attr-defined]
+        await pilot.pause()
+        app.command_input.insert("after")
+        await pilot.pause()
+        assert app.command_input.text == "\nafter"
+        assert submitted == []
+
+
+@pytest.mark.asyncio
+async def test_shift_then_enter_sequence_inserts_newline() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        assert app.command_input is not None
+        submitted: list[str] = []
+
+        async def _capture_input(value: str) -> None:
+            submitted.append(value)
+
+        original_handle_input = app.controller.handle_input
+
+        async def handle_input_override(value: str):
+            await _capture_input(value)
+            await original_handle_input(value)
+
+        app.controller.handle_input = handle_input_override  # type: ignore[assignment]
+        await pilot.pause()
+
+        shift_event = events.Key("shift", None)
+        await app.command_input._on_key(shift_event)  # type: ignore[attr-defined]
+        enter_event = events.Key("enter", "\r")
+        await app.command_input._on_key(enter_event)  # type: ignore[attr-defined]
+        await pilot.pause()
+        app.command_input.insert("after")
+        await pilot.pause()
+        assert app.command_input.text == "\nafter"
+        assert submitted == []
