@@ -310,7 +310,7 @@ def test_paused_instruction_broadcast(monkeypatch, tmp_path):
     def fake_run(command, check=False, stdout=None, stderr=None, text=None):
         recorded.append(command)
         if "list-panes" in command:
-            return SimpleNamespace(returncode=0, stdout="%0\n%1\n", stderr="")
+            return SimpleNamespace(returncode=0, stdout="%0\n%1\n%2\n%3\n", stderr="")
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -319,10 +319,12 @@ def test_paused_instruction_broadcast(monkeypatch, tmp_path):
 
     expected_prefix = ["tmux", "list-panes", "-t", controller._config.tmux_session, "-F", "#{pane_id}"]
     assert expected_prefix in recorded
-    assert ["tmux", "send-keys", "-t", "%0", "echo pause", "Enter"] in recorded
-    assert ["tmux", "send-keys", "-t", "%1", "echo pause", "Enter"] in recorded
+    assert ["tmux", "send-keys", "-t", "%2", "echo pause", "Enter"] in recorded
+    assert ["tmux", "send-keys", "-t", "%3", "echo pause", "Enter"] in recorded
+    assert ["tmux", "send-keys", "-t", "%0", "echo pause", "Enter"] not in recorded
+    assert ["tmux", "send-keys", "-t", "%1", "echo pause", "Enter"] not in recorded
     log_messages = [payload["text"] for event, payload in events if event == "log"]
-    assert any("[pause]" in msg for msg in log_messages)
+    assert any("[pause] 2 ワーカーペイン" in msg for msg in log_messages)
 
 
 def test_attach_auto_mode_skips_when_already_attached(monkeypatch, manifest_store, tmp_path):

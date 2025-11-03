@@ -227,19 +227,14 @@ async def test_escape_broadcasts_to_tmux(monkeypatch) -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
-        called = {
-            "value": False,
-        }
-
-        def fake_handle() -> None:
-            called["value"] = True
-
-        app.controller.handle_escape = fake_handle  # type: ignore[assignment]
+        app.controller.broadcast_escape = lambda: None  # type: ignore[assignment]
 
         await pilot.press("escape")
         await pilot.pause()
 
-        assert called["value"] is True
+        assert app.controller._paused is True
+        assert "paused" in app.classes
+        assert app.command_input.placeholder.startswith("一時停止中")
 
 @pytest.mark.asyncio
 async def test_shift_enter_combo_inserts_newline() -> None:

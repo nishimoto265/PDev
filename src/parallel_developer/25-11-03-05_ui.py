@@ -155,9 +155,11 @@ class CommandTextArea(TextArea):
 
 
 class CommandHint(Static):
-    def update_hint(self) -> None:
+    def update_hint(self, paused: bool = False) -> None:
+        suffix = "（一時停止中: 追加指示はワーカーへ送信 / ESCで巻き戻し）" if paused else ""
         self.update(
-            "Commands : /attach, /parallel, /mode, /resume, /log, /status, /scoreboard, /help, /exit"
+            "Commands : /attach, /parallel, /mode, /resume, /log, /status, /scoreboard, /help, /exit | ESC: 一時停止/巻き戻し "
+            + suffix
         )
 
 

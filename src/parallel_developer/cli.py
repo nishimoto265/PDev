@@ -410,6 +410,7 @@ class CLIController:
             if ref.session_id == token or ref.session_id.startswith(token):
                 return idx
         return None
+        self._emit_pause_state()
 
     def broadcast_escape(self) -> None:
         session_name = self._config.tmux_session
@@ -433,12 +434,14 @@ class CLIController:
             self._paused = True
             self._emit("log", {"text": "一時停止モードに入りました。追加指示は現在のtmuxペインへ送信されます。"})
             self._emit_status("一時停止中")
+            self._emit_pause_state()
             return
         if self._running:
             self._revert_pending = True
             self._paused = False
             self._emit("log", {"text": "現在のサイクル完了後に前の状態へ戻します。"})
             self._emit_status("巻き戻し待機中")
+            self._emit_pause_state()
             return
         self._perform_revert()
 
@@ -471,10 +474,11 @@ class CLIController:
         pane_ids = self._tmux_list_panes()
         if pane_ids is None:
             return
-        if not pane_ids:
-            self._emit("log", {"text": f"tmuxセッション {session_name} にペインが見つからず、追加指示を送信できませんでした。"})
+        if len(pane_ids) <= 2:
+            self._emit("log", {"text": f"tmuxセッション {session_name} にワーカーペインが見つからず、追加指示を送信できませんでした。"})
             return
-        for pane_id in pane_ids:
+        worker_panes = pane_ids[2:]
+        for pane_id in worker_panes:
             subprocess.run(
                 ["tmux", "send-keys", "-t", pane_id, instruction, "Enter"],
                 check=False,
@@ -482,7 +486,7 @@ class CLIController:
         preview = instruction.replace("\n", " ")[:60]
         if len(instruction) > 60:
             preview += "..."
-        self._emit("log", {"text": f"[pause] {len(pane_ids)} ペインへ追加指示を送信: {preview}"})
+        self._emit("log", {"text": f"[pause] {len(worker_panes)} ワーカーペインへ追加指示を送信: {preview}"})
 
     def _record_cycle_snapshot(self, result: OrchestrationResult) -> None:
         snapshot = {
@@ -497,6 +501,7 @@ class CLIController:
             self._paused = False
             self._emit("log", {"text": "巻き戻し可能なサイクルがありません。"})
             self._emit_status("待機中")
+            self._emit_pause_state()
             return
         self._cycle_history.pop()
         snapshot = self._cycle_history[-1]
@@ -509,6 +514,10 @@ class CLIController:
         summary = self._last_selected_session or "(未選択)"
         self._emit("log", {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
         self._emit_status("待機中")
+        self._emit_pause_state()
+
+    def _emit_pause_state(self) -> None:
+        self._emit("pause_state", {"paused": self._paused})
 
     async def _run_instruction(self, instruction: str) -> None:
         if self._running:
@@ -586,6 +595,7 @@ class CLIController:
                 self._perform_revert()
             else:
                 self._emit_status("一時停止中" if self._paused else "待機中")
+                self._emit_pause_state()
             if auto_attach_task:
                 try:
                     await auto_attach_task
@@ -956,12 +966,27 @@ class ParallelDeveloperApp(App):
         min-height: 3;
         overflow-x: hidden;
     }
+
+    Screen.paused #status {
+        border: round $warning;
+        background: $warning-darken-2;
+        color: $text;
+    }
+
+    Screen.paused #command {
+        border: round $warning;
+        background: $surface-lighten-3;
+    }
+
+    Screen.paused #hint {
+        color: $warning;
+    }
     """
 
     BINDINGS = [
         ("ctrl+c", "quit", "終了"),
         ("ctrl+q", "quit", "終了"),
-        ("escape", "close_palette", "閉じる"),
+        ("escape", "close_palette", "一時停止/巻き戻し"),
         ("tab", "palette_next", "次候補"),
         ("shift+tab", "palette_previous", "前候補"),
     ]
@@ -973,10 +998,13 @@ class ParallelDeveloperApp(App):
         self.selection_list: Optional[OptionList] = None
         self.command_input: Optional[CommandTextArea] = None
         self.command_palette: Optional[CommandPalette] = None
+        self.command_hint: Optional[CommandHint] = None
         self._suppress_command_change: bool = False
         self._last_command_text: str = ""
         self._palette_mode: Optional[str] = None
         self._pending_command: Optional[str] = None
+        self._default_placeholder: str = "指示または /コマンド"
+        self._paused_placeholder: str = "一時停止中: ワーカーへの追加指示を入力"
         self.controller = CLIController(
             event_handler=self._handle_controller_event,
             manifest_store=ManifestStore(),
@@ -999,11 +1027,12 @@ class ParallelDeveloperApp(App):
                 self.command_palette.display = False
                 yield self.command_palette
                 hint = CommandHint(id="hint")
-                hint.update_hint()
+                hint.update_hint(False)
+                self.command_hint = hint
                 yield hint
                 self.command_input = CommandTextArea(
                     text="",
-                    placeholder="指示または /コマンド",
+                    placeholder=self._default_placeholder,
                     id="command",
                     soft_wrap=True,
                     tab_behavior="focus",
@@ -1018,6 +1047,9 @@ class ParallelDeveloperApp(App):
         if self.command_input:
             self.command_input.focus()
         self._post_event("status", {"message": "待機中"})
+        self.set_class(False, "paused")
+        if self.command_hint:
+            self.command_hint.update_hint(False)
 
     def _submit_command_input(self) -> None:
         if not self.command_input:
@@ -1114,6 +1146,14 @@ class ParallelDeveloperApp(App):
             else:
                 message = self._save_log_to_path(destination)
                 self._notify_status(message)
+        elif event.event_type == "pause_state":
+            paused = bool(event.payload.get("paused", False))
+            self.set_class(paused, "paused")
+            if self.command_input:
+                placeholder = self._paused_placeholder if paused else self._default_placeholder
+                self.command_input.placeholder = placeholder
+            if self.command_hint:
+                self.command_hint.update_hint(paused)
         elif event.event_type == "selection_request":
             candidates = event.payload.get("candidates", [])
             scoreboard = event.payload.get("scoreboard", {})
