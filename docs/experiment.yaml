@@ -271,3 +271,13 @@
   - uv run pytest
   result: tests 46 passed
   notes: 機能回帰なしを確認済み。今後のリファクタ準備としてコードの複雑度を軽減
+- date: '2025-11-03'
+  time_utc: '04:58:00'
+  summary: 本格リファクタの構造計画を策定
+  details:
+  - CLI/Controller/UI/サービス層の責務と依存関係を棚卸し
+  - docs/25-11-03-04_refactor_plan.md に段階的な再構成方針とテスト戦略をまとめた
+  reproduce:
+  - N/A (計画策定のみ)
+  result: not run (planning-only)
+  notes: フェーズ1ではCLIControllerのモジュール分割とAPI整理から着手予定
