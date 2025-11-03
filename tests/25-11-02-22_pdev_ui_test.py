@@ -233,7 +233,7 @@ async def test_escape_broadcasts_to_tmux(monkeypatch) -> None:
         await pilot.pause()
 
         assert app.controller._paused is True
-        assert "paused" in app.classes
+        assert app.command_input.has_class("paused")
         assert app.command_input.placeholder.startswith("一時停止中")
 
 @pytest.mark.asyncio

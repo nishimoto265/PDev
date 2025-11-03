@@ -964,10 +964,18 @@ class ParallelDeveloperApp(App):
         overflow-x: hidden;
     }
 
+    #log.paused {
+        border: round $warning;
+    }
+
     #status {
         border: round $success;
         padding: 1;
-        color: $text;
+    }
+
+    #status.paused {
+        border: round $warning;
+        color: $warning;
     }
 
     #selection {
@@ -986,20 +994,15 @@ class ParallelDeveloperApp(App):
         min-height: 3;
         overflow-x: hidden;
         border: round $success;
+        background: $surface;
     }
 
-    Screen.paused #status {
-        border: round $warning;
-        background: $surface-lighten-2;
-        color: $warning;
-    }
-
-    Screen.paused #command {
+    #command.paused {
         border: round $warning;
         background: $surface-lighten-3;
     }
 
-    Screen.paused #hint {
+    #hint.paused {
         color: $warning;
     }
     """
@@ -1169,11 +1172,16 @@ class ParallelDeveloperApp(App):
                 self._notify_status(message)
         elif event.event_type == "pause_state":
             paused = bool(event.payload.get("paused", False))
-            self.set_class(paused, "paused")
+            if self.status_panel:
+                self.status_panel.set_class(paused, "paused")
+            if self.log_panel:
+                self.log_panel.set_class(paused, "paused")
             if self.command_input:
+                self.command_input.set_class(paused, "paused")
                 placeholder = self._paused_placeholder if paused else self._default_placeholder
                 self.command_input.placeholder = placeholder
             if self.command_hint:
+                self.command_hint.set_class(paused, "paused")
                 self.command_hint.update_hint(paused)
         elif event.event_type == "selection_request":
             candidates = event.payload.get("candidates", [])
