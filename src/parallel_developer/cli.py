@@ -24,7 +24,7 @@ from contextlib import suppress
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Footer, Header, Input, OptionList, RichLog, Static
+from textual.widgets import Footer, Header, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 from textual.dom import NoScreen
 
@@ -223,6 +223,28 @@ class EventLog(RichLog):
     @property
     def entries(self) -> List[str]:
         return list(self._entries)
+
+
+class CommandTextArea(TextArea):
+    def action_cursor_down(self, select: bool = False) -> None:  # type: ignore[override]
+        if select:
+            super().action_cursor_down(select)
+            return
+        app = self.app
+        if getattr(getattr(app, "command_palette", None), "display", False):
+            app.command_palette.move_next()  # type: ignore[union-attr]
+            return
+        super().action_cursor_down(select)
+
+    def action_cursor_up(self, select: bool = False) -> None:  # type: ignore[override]
+        if select:
+            super().action_cursor_up(select)
+            return
+        app = self.app
+        if getattr(getattr(app, "command_palette", None), "display", False):
+            app.command_palette.move_previous()  # type: ignore[union-attr]
+            return
+        super().action_cursor_up(select)
 
 
 class CommandHint(Static):
@@ -957,6 +979,9 @@ class ParallelDeveloperApp(App):
 
     #command {
         margin-top: 1;
+        height: auto;
+        min-height: 3;
+        overflow-x: hidden;
     }
     """
 
@@ -973,8 +998,10 @@ class ParallelDeveloperApp(App):
         self.status_panel: Optional[StatusPanel] = None
         self.log_panel: Optional[EventLog] = None
         self.selection_list: Optional[OptionList] = None
-        self.command_input: Optional[Input] = None
+        self.command_input: Optional[CommandTextArea] = None
         self.command_palette: Optional[CommandPalette] = None
+        self._suppress_command_change: bool = False
+        self._last_command_text: str = ""
         self._palette_mode: Optional[str] = None
         self._pending_command: Optional[str] = None
         self.controller = CLIController(
@@ -1001,7 +1028,16 @@ class ParallelDeveloperApp(App):
                 hint = CommandHint(id="hint")
                 hint.update_hint()
                 yield hint
-                self.command_input = Input(placeholder="指示または /コマンド", id="command")
+                self.command_input = CommandTextArea(
+                    text="",
+                    placeholder="指示または /コマンド",
+                    id="command",
+                    soft_wrap=True,
+                    tab_behavior="focus",
+                    show_line_numbers=False,
+                    highlight_cursor_line=False,
+                    compact=True,
+                )
                 yield self.command_input
         yield Footer()
 
@@ -1010,24 +1046,33 @@ class ParallelDeveloperApp(App):
             self.command_input.focus()
         self._post_event("status", {"message": "待機中"})
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def _submit_command_input(self) -> None:
+        if not self.command_input:
+            return
+        value = self.command_input.text
         if self.command_palette and self.command_palette.display:
             item = self.command_palette.get_active_item()
             if item:
-                event.stop()
                 asyncio.create_task(self._handle_palette_selection(item))
             return
         self._hide_command_palette()
-        if self.command_input:
-            self.command_input.value = ""
-        asyncio.create_task(self.controller.handle_input(event.value))
+        self._set_command_text("")
+        asyncio.create_task(self.controller.handle_input(value.rstrip("\n")))
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        value = event.value
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if not self.command_input or event.control is not self.command_input:
+            return
+        if self._suppress_command_change:
+            return
+        value = self.command_input.text
+        if value == self._last_command_text:
+            return
         if not value:
+            self._last_command_text = value
             self._hide_command_palette()
             return
         if not value.startswith("/"):
+            self._last_command_text = value
             self._hide_command_palette()
             return
         command, has_space, remainder = value.partition(" ")
@@ -1035,13 +1080,16 @@ class ParallelDeveloperApp(App):
         if not has_space:
             self._pending_command = None
             self._update_command_suggestions(command)
+            self._last_command_text = value
             return
         spec = self.controller._command_specs.get(command)
         if spec is None:
+            self._last_command_text = value
             self._hide_command_palette()
             return
         options = self.controller.get_command_options(command)
         if not options:
+            self._last_command_text = value
             self._hide_command_palette()
             return
         remainder = remainder.strip()
@@ -1052,10 +1100,12 @@ class ParallelDeveloperApp(App):
             if not remainder or value_str.startswith(remainder) or label.lower().startswith(remainder.lower()):
                 filtered.append(PaletteItem(label, opt.value))
         if not filtered:
+            self._last_command_text = value
             self._hide_command_palette()
             return
         self._pending_command = command
         self._show_command_palette(filtered, mode="options")
+        self._last_command_text = value
 
     def _handle_controller_event(self, event_type: str, payload: Dict[str, object]) -> None:
         def _post() -> None:
@@ -1146,13 +1196,21 @@ class ParallelDeveloperApp(App):
             return f"{label_body} • {score_text} • {comment}"
         return f"{label_body} • {score_text}"
 
+    def _set_command_text(self, value: str) -> None:
+        if not self.command_input:
+            return
+        self._suppress_command_change = True
+        self.command_input.text = value
+        self._suppress_command_change = False
+        self._last_command_text = value
+
     def _update_command_suggestions(self, prefix: str) -> None:
         suggestions = self.controller.get_command_suggestions(prefix)
         if not suggestions:
             self._hide_command_palette()
             return
         if self.command_input:
-            self.command_input.value = prefix
+            self._set_command_text(prefix)
         items = [PaletteItem(f"{s.name:<10} {s.description}", s.name) for s in suggestions]
         self._show_command_palette(items, mode="command")
 
@@ -1236,6 +1294,18 @@ class ParallelDeveloperApp(App):
             self.log_panel.log(message)
 
     def on_key(self, event: events.Key) -> None:
+        if (
+            self.command_input
+            and self.command_input.has_focus
+            and event.key == "enter"
+        ):
+            if event.shift:
+                event.stop()
+                self.command_input.insert("\n")
+                return
+            event.stop()
+            self._submit_command_input()
+            return
         if self._handle_text_shortcuts(event):
             return
         if self.command_palette and self.command_palette.display:
@@ -1348,10 +1418,10 @@ class ParallelDeveloperApp(App):
                 option_items = [PaletteItem(opt.label, opt.value) for opt in options]
                 self._show_command_palette(option_items, mode="options")
                 if self.command_input:
-                    self.command_input.value = f"{command_name} "
+                    self._set_command_text(f"{command_name} ")
                 return
             if self.command_input:
-                self.command_input.value = ""
+                self._set_command_text("")
             self._hide_command_palette()
             await self.controller.execute_command(command_name)
             return
@@ -1360,7 +1430,7 @@ class ParallelDeveloperApp(App):
             value = item.value
             self._pending_command = None
             if self.command_input:
-                self.command_input.value = ""
+                self._set_command_text("")
             self._hide_command_palette()
             await self.controller.execute_command(command_name, value)
 

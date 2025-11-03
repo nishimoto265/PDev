@@ -241,3 +241,13 @@
   - uv run pytest
   result: tests 40 passed
   notes: 選択コピーやステータス出力の挙動は従来通り
+- date: '2025-11-03'
+  time_utc: '00:20:00'
+  summary: コマンド入力をTextArea化し折り返し・改行を改善
+  details:
+  - CommandTextAreaコンポーネントを導入し、入力欄でのソフトラップとShift+Enterによる改行を実装
+  - 下矢印/上矢印はコマンドパレットの選択移動へ転送し、従来のキーバインドを維持
+  reproduce:
+  - uv run pytest
+  result: tests 40 passed
+  notes: 長文指示でも入力欄が横スクロール無しで閲覧可能

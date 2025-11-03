@@ -1,12 +1,13 @@
 import pytest
 
 from textual import events
-from textual.widgets import Input, OptionList
+from textual.widgets import OptionList
 
 from parallel_developer.cli import (
     CommandPalette,
     ControllerEvent,
     EventLog,
+    CommandTextArea,
     ParallelDeveloperApp,
 )
 
@@ -58,7 +59,7 @@ async def test_click_body_refocuses_input_when_selection_hidden() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
-        command_input = app.query_one("#command", Input)
+        command_input = app.query_one("#command", CommandTextArea)
         await pilot.click("#body")
         await pilot.pause()
         assert command_input.has_focus

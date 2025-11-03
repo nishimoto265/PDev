@@ -190,3 +190,14 @@
   - uv run pytest
   result: tests 40 passed
   notes: 選択コピー動作は従来どおり保持されている
+- date: '2025-11-03'
+  time_utc: '00:20:00'
+  summary: コマンド入力をTextArea化し折り返し・改行を改善
+  details:
+  - 入力欄をTextAreaベースのCommandTextAreaに置き換え、ソフトラップと複数行編集をサポート
+  - Enterで送信、Shift+Enterで改行できるようキー処理を追加し、上下キーはコマンドパレット操作に転送
+  - テキスト変更イベントの二重処理を抑制し、既存のコマンドサジェストやショートカットを維持
+  reproduce:
+  - uv run pytest
+  result: tests 40 passed
+  notes: command_inputはフォーカスを保持したまま、矢印キーでパレット候補を移動可能
