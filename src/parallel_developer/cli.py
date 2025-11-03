@@ -227,32 +227,48 @@ class EventLog(RichLog):
 
 class CommandTextArea(TextArea):
     async def _on_key(self, event: events.Key) -> None:  # type: ignore[override]
-        if not hasattr(self, "_shift_pressed"):
-            self._shift_pressed = False  # type: ignore[attr-defined]
-        if event.key == "shift":
+        key = event.key or ""
+        name = event.name or ""
+        aliases = set(event.aliases)
+
+        if not hasattr(self, "_shift_next_enter"):
+            self._shift_next_enter = False  # type: ignore[attr-defined]
+
+        if key == "shift":
             event.stop()
             event.prevent_default()
-            self._shift_pressed = True  # type: ignore[attr-defined]
+            self._shift_next_enter = True  # type: ignore[attr-defined]
             return
-        shift_active = self._shift_pressed  # type: ignore[attr-defined]
-        self._shift_pressed = False  # type: ignore[attr-defined]
-        if event.key == "shift+enter" or event.name == "shift_enter" or "shift+enter" in event.aliases:
+
+        if key in {"ctrl+enter", "meta+enter"} or name in {"ctrl_enter", "meta_enter"} or aliases.intersection({"ctrl+enter", "meta+enter"}):
             event.stop()
             event.prevent_default()
-            self.insert("\n")
-            return
-        if event.key == "enter" and shift_active:
-            event.stop()
-            event.prevent_default()
-            self.insert("\n")
-            return
-        if event.key == "enter":
-            event.stop()
-            event.prevent_default()
+            self._shift_next_enter = False  # type: ignore[attr-defined]
             app = self.app
             if hasattr(app, "_submit_command_input"):
                 app._submit_command_input()  # type: ignore[attr-defined]
             return
+
+        if key == "shift+enter" or name == "shift_enter" or "shift+enter" in aliases:
+            event.stop()
+            event.prevent_default()
+            self._shift_next_enter = False  # type: ignore[attr-defined]
+            self.insert("\n")
+            return
+
+        if key == "enter":
+            event.stop()
+            event.prevent_default()
+            if getattr(self, "_shift_next_enter", False):
+                self._shift_next_enter = False  # type: ignore[attr-defined]
+                self.insert("\n")
+            else:
+                app = self.app
+                if hasattr(app, "_submit_command_input"):
+                    app._submit_command_input()  # type: ignore[attr-defined]
+            return
+
+        self._shift_next_enter = False  # type: ignore[attr-defined]
         await super()._on_key(event)
 
     def action_cursor_down(self, select: bool = False) -> None:  # type: ignore[override]

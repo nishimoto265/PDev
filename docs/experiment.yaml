@@ -251,3 +251,13 @@
   - uv run pytest
   result: tests 40 passed
   notes: 長文指示でも入力欄が横スクロール無しで閲覧可能
+- date: '2025-11-03'
+  time_utc: '04:10:00'
+  summary: Shift+Enter送信バグを再現テストでFIX
+  details:
+  - CommandTextAreaでShift押下状態を追跡し、Shift+Enterは改行・Enter単体は送信・Ctrl+Enterは送信に振り分け
+  - 送信処理はテスト中にスタブ化し、Shift→Enter→Enterなどの実機シーケンスをUIテスト化
+  reproduce:
+  - uv run pytest tests/25-11-02-22_pdev_ui_test.py
+  result: tests 46 passed
+  notes: テストはtmux起動を伴わず高速に回る

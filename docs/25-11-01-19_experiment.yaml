@@ -201,3 +201,14 @@
   - uv run pytest
   result: tests 40 passed
   notes: command_inputはフォーカスを保持したまま、矢印キーでパレット候補を移動可能
+- date: '2025-11-03'
+  time_utc: '04:10:00'
+  summary: Shift+Enter送信バグを再現テストでFIX
+  details:
+  - TextAreaにシフト押下フラグを持たせ、Shift+Enterは改行、Ctrl+Enterは送信、単独Enterは送信になるよう整理
+  - 送信処理をスタブ化するテストヘルパを導入し、Shift+Enterが送信されないこと・Enterが送信されることをUIテストで検証
+  - shift→enter→enter など実機で起きていたシーケンスもテストで再現しレッド→グリーンを確認
+  reproduce:
+  - uv run pytest tests/25-11-02-22_pdev_ui_test.py
+  result: tests 46 passed
+  notes: テストはTextualのPilot APIでキー操作を再現、tmuxや本来の送信フローを起動せず検証可能

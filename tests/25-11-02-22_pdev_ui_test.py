@@ -146,81 +146,163 @@ async def test_shift_enter_inserts_newline() -> None:
         assert app.command_input is not None
         submitted: list[str] = []
 
-        async def _capture_input(value: str) -> None:
-            submitted.append(value)
+        original_submit = app._submit_command_input
 
-        original_handle_input = app.controller.handle_input
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text.rstrip("\n"))
+                app._set_command_text("")
 
-        async def handle_input_override(value: str):
-            await _capture_input(value)
-            await original_handle_input(value)
-
-        app.controller.handle_input = handle_input_override  # type: ignore[assignment]
-        app.command_input.insert("line1")
-        await pilot.pause()
-        await pilot.press("shift+enter")
-        await pilot.pause()
-        app.command_input.insert("line2")
-        await pilot.pause()
-        assert app.command_input.text == "line1\nline2"
-        assert submitted == []
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("line1")
+            await pilot.pause()
+            await pilot.press("shift+enter")
+            await pilot.pause()
+            app.command_input.insert("line2")
+            await pilot.pause()
+            assert app.command_input.text == "line1\nline2"
+            assert submitted == []
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
 
 
 @pytest.mark.asyncio
-async def test_shift_enter_from_key_name() -> None:
+async def test_plain_enter_triggers_submission() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
         assert app.command_input is not None
         submitted: list[str] = []
 
-        async def _capture_input(value: str) -> None:
-            submitted.append(value)
+        original_submit = app._submit_command_input
 
-        original_handle_input = app.controller.handle_input
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text.rstrip("\n"))
+                app._set_command_text("")
 
-        async def handle_input_override(value: str):
-            await _capture_input(value)
-            await original_handle_input(value)
-
-        app.controller.handle_input = handle_input_override  # type: ignore[assignment]
-        await pilot.pause()
-        fake_event = events.Key("enter", "\r")
-        fake_event.aliases.append("shift+enter")
-        await app.command_input._on_key(fake_event)  # type: ignore[attr-defined]
-        await pilot.pause()
-        app.command_input.insert("after")
-        await pilot.pause()
-        assert app.command_input.text == "\nafter"
-        assert submitted == []
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("message")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert submitted == ["message"]
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
 
 
 @pytest.mark.asyncio
-async def test_shift_then_enter_sequence_inserts_newline() -> None:
+async def test_shift_then_enter_inserts_newline() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
         assert app.command_input is not None
         submitted: list[str] = []
 
-        async def _capture_input(value: str) -> None:
-            submitted.append(value)
+        original_submit = app._submit_command_input
 
-        original_handle_input = app.controller.handle_input
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text.rstrip("\n"))
+                app._set_command_text("")
 
-        async def handle_input_override(value: str):
-            await _capture_input(value)
-            await original_handle_input(value)
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("before")
+            await pilot.pause()
+            await pilot.press("shift")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.command_input.text.endswith("before\n")
+            assert submitted == []
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
 
-        app.controller.handle_input = handle_input_override  # type: ignore[assignment]
+
+@pytest.mark.asyncio
+async def test_shift_enter_combo_inserts_newline() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
+        assert app.command_input is not None
+        submitted: list[str] = []
 
-        shift_event = events.Key("shift", None)
-        await app.command_input._on_key(shift_event)  # type: ignore[attr-defined]
-        enter_event = events.Key("enter", "\r")
-        await app.command_input._on_key(enter_event)  # type: ignore[attr-defined]
+        original_submit = app._submit_command_input
+
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text.rstrip("\n"))
+                app._set_command_text("")
+
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("before")
+            await pilot.pause()
+            await pilot.press("shift+enter")
+            await pilot.pause()
+            assert app.command_input.text.endswith("before\n")
+            assert submitted == []
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
+
+
+@pytest.mark.asyncio
+async def test_shift_enter_plain_enter_only_regression() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
-        app.command_input.insert("after")
+        assert app.command_input is not None
+        submitted: list[str] = []
+
+        original_submit = app._submit_command_input
+
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text.rstrip("\n"))
+                app._set_command_text("")
+
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("before")
+            await pilot.pause()
+            await pilot.press("shift")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert submitted == []
+            assert app.command_input.text.endswith("before\n")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert submitted == ["before"]
+            assert app.command_input.text == ""
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
+
+
+@pytest.mark.asyncio
+async def test_ctrl_enter_submits_instruction() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
-        assert app.command_input.text == "\nafter"
-        assert submitted == []
+        assert app.command_input is not None
+        submitted: list[str] = []
+
+        original_submit = app._submit_command_input
+
+        def capture_submit() -> None:
+            if app.command_input:
+                submitted.append(app.command_input.text)
+                app._set_command_text("")
+
+        app._submit_command_input = capture_submit  # type: ignore[assignment]
+        try:
+            app.command_input.insert("message")
+            await pilot.pause()
+            await pilot.press("ctrl+enter")
+            await pilot.pause()
+            assert submitted == ["message"]
+        finally:
+            app._submit_command_input = original_submit  # type: ignore[assignment]
