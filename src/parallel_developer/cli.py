@@ -200,7 +200,8 @@ class EventLog(RichLog):
                 renderable = Text(line)
             renderable.no_wrap = False
             renderable.overflow = "fold"
-            self.write(renderable)
+            width = self.size.width if self.size.width else None
+            self.write(renderable, width=width)
 
 
 class CommandHint(Static):
