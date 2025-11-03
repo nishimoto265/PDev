@@ -228,7 +228,9 @@ class EventLog(RichLog):
 class CommandTextArea(TextArea):
     async def _on_key(self, event: events.Key) -> None:  # type: ignore[override]
         if event.key == "shift+enter":
-            await super()._on_key(event)
+            event.stop()
+            event.prevent_default()
+            self.insert("\n")
             return
         if event.key == "enter":
             event.stop()

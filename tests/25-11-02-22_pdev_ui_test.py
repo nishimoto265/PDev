@@ -136,3 +136,18 @@ async def test_log_command_save(tmp_path) -> None:
         await app.controller.execute_command("/log", f"save {dest}")
         await pilot.pause()
         assert dest.read_text(encoding="utf-8").strip().splitlines() == ["alpha", "beta"]
+
+
+@pytest.mark.asyncio
+async def test_shift_enter_inserts_newline() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        assert app.command_input is not None
+        app.command_input.insert("line1")
+        await pilot.pause()
+        await pilot.press("shift+enter")
+        await pilot.pause()
+        app.command_input.insert("line2")
+        await pilot.pause()
+        assert app.command_input.text == "line1\nline2"
