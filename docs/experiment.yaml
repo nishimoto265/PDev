@@ -281,3 +281,14 @@
   - N/A (計画策定のみ)
   result: not run (planning-only)
   notes: フェーズ1ではCLIControllerのモジュール分割とAPI整理から着手予定
+- date: '2025-11-03'
+  time_utc: '05:34:00'
+  summary: Textual UIコンポーネントを別モジュール化
+  details:
+  - CommandPaletteやCommandTextAreaなどのUIクラスを25-11-03-05_ui.pyへ移動し、cli.pyを簡素化
+  - importlib.utilでタイムスタンプ付きモジュールを動的ロードし、既存テストが期待するエクスポートを維持
+  - 影響範囲のpytestを実行し、全46テストが通過することを確認
+  reproduce:
+  - uv run pytest
+  result: tests 46 passed
+  notes: controller本体は今後のフェーズで分割予定。UIコンポーネントの独立により再利用とテストの見通しが向上

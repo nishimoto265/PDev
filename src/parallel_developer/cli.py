@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import Future
+import importlib.util
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -31,6 +33,21 @@ from textual.dom import NoScreen
 from .orchestrator import CandidateInfo, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
+
+_UI_MODULE_PATH = Path(__file__).with_name("25-11-03-05_ui.py")
+_ui_spec = importlib.util.spec_from_file_location("parallel_developer.ui_widgets", _UI_MODULE_PATH)
+if _ui_spec is None or _ui_spec.loader is None:
+    raise RuntimeError(f"UI module not found at {_UI_MODULE_PATH}")
+_ui_module = importlib.util.module_from_spec(_ui_spec)
+sys.modules[_ui_spec.name] = _ui_module  # type: ignore[index]
+_ui_spec.loader.exec_module(_ui_module)
+CommandHint = _ui_module.CommandHint  # type: ignore[attr-defined]
+CommandPalette = _ui_module.CommandPalette  # type: ignore[attr-defined]
+CommandTextArea = _ui_module.CommandTextArea  # type: ignore[attr-defined]
+ControllerEvent = _ui_module.ControllerEvent  # type: ignore[attr-defined]
+EventLog = _ui_module.EventLog  # type: ignore[attr-defined]
+PaletteItem = _ui_module.PaletteItem  # type: ignore[attr-defined]
+StatusPanel = _ui_module.StatusPanel  # type: ignore[attr-defined]
 
 
 class SessionMode(str, Enum):
@@ -154,200 +171,6 @@ class CommandSuggestion:
 class CommandOption:
     label: str
     value: object
-
-
-@dataclass
-class PaletteItem:
-    label: str
-    value: object
-
-class ControllerEvent(Message):
-    def __init__(self, event_type: str, payload: Optional[Dict[str, object]] = None) -> None:
-        super().__init__()
-        self.event_type = event_type
-        self.payload = payload or {}
-
-
-class StatusPanel(Static):
-    def update_status(self, config: SessionConfig, message: str) -> None:
-        lines = [
-            f"tmux session : {config.tmux_session}",
-            f"mode         : {config.mode.value}",
-            f"workers      : {config.worker_count}",
-            f"logs root    : {config.logs_root}",
-            f"status       : {message}",
-        ]
-        self.update("\n".join(lines))
-
-
-class EventLog(RichLog):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, highlight=True, markup=True, **kwargs)
-        self.wrap = True
-        self.auto_scroll = True
-        self.min_width = 0
-        self._entries: List[str] = []
-
-    def log(self, text: str) -> None:
-        for line in text.splitlines():
-            self._entries.append(line)
-            self._write_line(line)
-
-    def _write_line(self, line: str) -> None:
-        if self.markup:
-            renderable = Text.from_markup(line)
-        else:
-            renderable = Text(line)
-        renderable.no_wrap = False
-        renderable.overflow = "fold"
-        super().write(renderable)
-
-    def on_resize(self, event: events.Resize) -> None:
-        super().on_resize(event)
-        self._redraw()
-
-    def _redraw(self) -> None:
-        if not self._entries:
-            return
-        if not getattr(self, "_size_known", False):
-            return
-        super().clear()
-        for line in self._entries:
-            self._write_line(line)
-
-    @property
-    def entries(self) -> List[str]:
-        return list(self._entries)
-
-
-class CommandTextArea(TextArea):
-    async def _on_key(self, event: events.Key) -> None:  # type: ignore[override]
-        key = event.key or ""
-        name = event.name or ""
-        aliases = set(event.aliases)
-
-        if not hasattr(self, "_shift_next_enter"):
-            self._shift_next_enter = False  # type: ignore[attr-defined]
-
-        if key == "shift":
-            event.stop()
-            event.prevent_default()
-            self._shift_next_enter = True  # type: ignore[attr-defined]
-            return
-
-        if key in {"ctrl+enter", "meta+enter"} or name in {"ctrl_enter", "meta_enter"} or aliases.intersection({"ctrl+enter", "meta+enter"}):
-            event.stop()
-            event.prevent_default()
-            self._shift_next_enter = False  # type: ignore[attr-defined]
-            app = self.app
-            if hasattr(app, "_submit_command_input"):
-                app._submit_command_input()  # type: ignore[attr-defined]
-            return
-
-        if key == "shift+enter" or name == "shift_enter" or "shift+enter" in aliases:
-            event.stop()
-            event.prevent_default()
-            self._shift_next_enter = False  # type: ignore[attr-defined]
-            self.insert("\n")
-            return
-
-        if key == "enter":
-            event.stop()
-            event.prevent_default()
-            if getattr(self, "_shift_next_enter", False):
-                self._shift_next_enter = False  # type: ignore[attr-defined]
-                self.insert("\n")
-            else:
-                app = self.app
-                if hasattr(app, "_submit_command_input"):
-                    app._submit_command_input()  # type: ignore[attr-defined]
-            return
-
-        self._shift_next_enter = False  # type: ignore[attr-defined]
-        await super()._on_key(event)
-
-    def action_cursor_down(self, select: bool = False) -> None:  # type: ignore[override]
-        if select:
-            super().action_cursor_down(select)
-            return
-        app = self.app
-        if getattr(getattr(app, "command_palette", None), "display", False):
-            app.command_palette.move_next()  # type: ignore[union-attr]
-            return
-        super().action_cursor_down(select)
-
-    def action_cursor_up(self, select: bool = False) -> None:  # type: ignore[override]
-        if select:
-            super().action_cursor_up(select)
-            return
-        app = self.app
-        if getattr(getattr(app, "command_palette", None), "display", False):
-            app.command_palette.move_previous()  # type: ignore[union-attr]
-            return
-        super().action_cursor_up(select)
-
-
-class CommandHint(Static):
-    def update_hint(self) -> None:
-        self.update(
-            "Commands : /attach, /parallel, /mode, /resume, /log, /status, /scoreboard, /help, /exit"
-        )
-
-
-class CommandPalette(Static):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.display = False
-        self._items: List[PaletteItem] = []
-        self._active_index: int = 0
-        self._renderable: Text = Text()
-
-    def set_items(self, items: List[PaletteItem]) -> None:
-        self._items = items
-        self._active_index = 0
-        if not items:
-            self.display = False
-            self._renderable = Text()
-            return
-        self.display = True
-        self._rebuild_renderable()
-
-    def _rebuild_renderable(self) -> None:
-        if not self._items:
-            self._renderable = Text()
-            return
-        lines: List[Text] = []
-        for idx, item in enumerate(self._items):
-            prefix = "▶ " if idx == self._active_index else "  "
-            style = "bold yellow" if idx == self._active_index else ""
-            lines.append(Text(prefix + item.label, style=style))
-        combined = Text()
-        for idx, segment in enumerate(lines):
-            if idx:
-                combined.append("\n")
-            combined.append(segment)
-        self._renderable = combined
-        self.refresh()
-
-    def move_next(self) -> None:
-        if not self._items:
-            return
-        self._active_index = (self._active_index + 1) % len(self._items)
-        self._rebuild_renderable()
-
-    def move_previous(self) -> None:
-        if not self._items:
-            return
-        self._active_index = (self._active_index - 1) % len(self._items)
-        self._rebuild_renderable()
-
-    def get_active_item(self) -> Optional[PaletteItem]:
-        if not self._items:
-            return None
-        return self._items[self._active_index]
-
-    def render(self) -> Text:
-        return self._renderable
 
 
 class CLIController:
