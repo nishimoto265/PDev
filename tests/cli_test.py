@@ -333,6 +333,15 @@ def test_handle_escape_reverts_initial_cycle(monkeypatch, tmp_path):
     assert status_messages and status_messages[-1] == "待機中"
 
 
+def test_on_main_session_started_sets_reuse_flag(tmp_path):
+    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
+    assert controller._config.reuse_existing_session is False
+
+    controller._on_main_session_started("session-main")
+
+    assert controller._active_main_session_id == "session-main"
+    assert controller._config.reuse_existing_session is True
+
 
 def test_paused_instruction_broadcast(monkeypatch, tmp_path):
     events = []

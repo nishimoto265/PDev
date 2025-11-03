@@ -583,6 +583,7 @@ class CLIController:
         self._active_main_session_id = session_id
         if self._last_selected_session is None:
             self._last_selected_session = session_id
+        self._config.reuse_existing_session = True
 
     async def _run_instruction(self, instruction: str) -> None:
         if self._running:
