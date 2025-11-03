@@ -199,6 +199,7 @@ class CLIController:
         self._paused: bool = False
         self._revert_pending: bool = False
         self._cycle_history: List[Dict[str, object]] = []
+        self._ignore_current_cycle: bool = False
         self._attach_manager = TmuxAttachManager()
         self._settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -437,10 +438,17 @@ class CLIController:
             self._emit_pause_state()
             return
         if self._running:
-            self._revert_pending = True
+            self._ignore_current_cycle = True
             self._paused = False
-            self._emit("log", {"text": "現在のサイクル完了後に前の状態へ戻します。"})
-            self._emit_status("巻き戻し待機中")
+            if self._cycle_history:
+                snapshot = self._cycle_history[-1]
+                self._last_selected_session = snapshot.get("selected_session")
+                self._last_scoreboard = snapshot.get("scoreboard", {})
+                self._last_instruction = snapshot.get("instruction")
+                if self._last_scoreboard:
+                    self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
+            self._emit("log", {"text": "現在のサイクルをキャンセルし、前の状態へ戻りました（進行中の結果は無視します）。"})
+            self._emit_status("待機中")
             self._emit_pause_state()
             return
         self._perform_revert()
@@ -487,6 +495,9 @@ class CLIController:
         if len(instruction) > 60:
             preview += "..."
         self._emit("log", {"text": f"[pause] {len(worker_panes)} ワーカーペインへ追加指示を送信: {preview}"})
+        self._paused = False
+        self._emit_pause_state()
+        self._emit_status("待機中")
 
     def _record_cycle_snapshot(self, result: OrchestrationResult) -> None:
         snapshot = {
@@ -574,6 +585,10 @@ class CLIController:
             if self._attach_mode == "auto":
                 auto_attach_task = asyncio.create_task(self._handle_attach_command(force=False))
             result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
+            if self._ignore_current_cycle:
+                self._ignore_current_cycle = False
+                self._emit("log", {"text": "一時停止中に開始されたサイクル結果は破棄しました。"})
+                return
             self._last_scoreboard = dict(result.sessions_summary)
             self._last_instruction = instruction
             self._last_selected_session = result.selected_session

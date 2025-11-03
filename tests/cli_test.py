@@ -289,11 +289,16 @@ def test_handle_escape_sets_revert_pending_when_running(monkeypatch, tmp_path):
     controller.broadcast_escape = lambda: None  # type: ignore[assignment]
     controller._paused = True
     controller._running = True
+    controller._cycle_history = [
+        {"selected_session": "session-A", "scoreboard": {}, "instruction": "first"},
+    ]
+    controller._last_selected_session = "session-A"
 
     controller.handle_escape()
 
-    assert controller._revert_pending is True
+    assert controller._ignore_current_cycle is True
     assert controller._paused is False
+    assert controller._last_selected_session == "session-A"
 
 
 def test_paused_instruction_broadcast(monkeypatch, tmp_path):
@@ -325,6 +330,7 @@ def test_paused_instruction_broadcast(monkeypatch, tmp_path):
     assert ["tmux", "send-keys", "-t", "%1", "echo pause", "Enter"] not in recorded
     log_messages = [payload["text"] for event, payload in events if event == "log"]
     assert any("[pause] 2 ワーカーペイン" in msg for msg in log_messages)
+    assert controller._paused is False
 
 
 def test_attach_auto_mode_skips_when_already_attached(monkeypatch, manifest_store, tmp_path):
