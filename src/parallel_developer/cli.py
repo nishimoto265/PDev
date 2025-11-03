@@ -202,6 +202,7 @@ class CLIController:
         self._current_cycle_id: Optional[int] = None
         self._cancelled_cycles: Set[int] = set()
         self._active_orchestrator: Optional[Orchestrator] = None
+        self._queued_instruction: Optional[str] = None
         self._attach_manager = TmuxAttachManager()
         self._settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +255,14 @@ class CLIController:
             return
         if self._paused:
             await self._dispatch_paused_instruction(text)
+            return
+        if self._running:
+            if self._current_cycle_id and self._current_cycle_id in self._cancelled_cycles:
+                self._queued_instruction = text
+                self._emit("log", {"text": "キャンセル処理中です。完了後にこの指示を実行します。"})
+                return
+        if self._running:
+            self._emit("log", {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
             return
         await self._run_instruction(text)
 
@@ -454,11 +463,10 @@ class CLIController:
             current_id = self._current_cycle_id
             if current_id is not None:
                 self._cancelled_cycles.add(current_id)
-            self._current_cycle_id = None
-            self._running = False
             self._paused = False
-            self._emit("log", {"text": "現在のサイクルをキャンセルし、前の状態へ戻しました。"})
-            self._perform_revert()
+            self._emit("log", {"text": "現在のサイクルをキャンセルしています。完了後に前の状態へ戻ります。"})
+            self._emit_status("キャンセル中")
+            self._emit_pause_state()
             return
         self._perform_revert()
 
@@ -517,12 +525,13 @@ class CLIController:
         }
         self._cycle_history.append(snapshot)
 
-    def _perform_revert(self) -> None:
+    def _perform_revert(self, silent: bool = False) -> None:
         if not self._cycle_history:
             self._paused = False
-            self._emit("log", {"text": "巻き戻し可能なサイクルがありません。"})
-            self._emit_status("待機中")
-            self._emit_pause_state()
+            if not silent:
+                self._emit("log", {"text": "巻き戻し可能なサイクルがありません。"})
+                self._emit_status("待機中")
+                self._emit_pause_state()
             return
         self._cycle_history.pop()
         snapshot = self._cycle_history[-1] if self._cycle_history else None
@@ -538,9 +547,10 @@ class CLIController:
             self._last_instruction = None
         self._paused = False
         summary = self._last_selected_session or "(未選択)"
-        self._emit("log", {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
-        self._emit_status("待機中")
-        self._emit_pause_state()
+        if not silent:
+            self._emit("log", {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
+            self._emit_status("待機中")
+            self._emit_pause_state()
 
     def _emit_pause_state(self) -> None:
         self._emit("pause_state", {"paused": self._paused})
@@ -626,7 +636,12 @@ class CLIController:
             self._selection_context = None
             if self._current_cycle_id == cycle_id:
                 self._current_cycle_id = None
-                self._running = False
+            self._running = False
+            if cancelled:
+                self._emit_status("待機中")
+                self._emit_pause_state()
+                self._perform_revert(silent=True)
+            else:
                 self._emit_status("一時停止中" if self._paused else "待機中")
                 self._emit_pause_state()
             if auto_attach_task:
@@ -636,6 +651,12 @@ class CLIController:
                     self._emit("log", {"text": "[auto] tmuxへの接続処理でエラーが発生しました。"})
             if self._active_orchestrator is orchestrator:
                 self._active_orchestrator = None
+            if cancelled:
+                queued = self._queued_instruction
+                self._queued_instruction = None
+                if queued:
+                    asyncio.create_task(self.handle_input(queued))
+                return
 
     def _resolve_selection(self, index: int) -> None:
         if not self._selection_context:

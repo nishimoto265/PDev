@@ -288,6 +288,7 @@ def test_handle_escape_cancels_running_cycle(monkeypatch, tmp_path):
     controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
     controller.broadcast_escape = lambda: None  # type: ignore[assignment]
     controller._paused = True
+    controller._paused = True
     controller._running = True
     controller._current_cycle_id = 2
     controller._cycle_history = [
@@ -298,11 +299,15 @@ def test_handle_escape_cancels_running_cycle(monkeypatch, tmp_path):
 
     controller.handle_escape()
 
-    assert controller._running is False
+    assert controller._running is True
     assert controller._paused is False
-    assert controller._current_cycle_id is None
+    assert controller._current_cycle_id == 2
     assert 2 in controller._cancelled_cycles
-    assert controller._last_selected_session == "session-A"
+    assert controller._last_selected_session == "session-B"
+    assert controller._current_cycle_id == 2
+    assert 2 in controller._cancelled_cycles
+    # 状態は巻き戻しで更新されるまで現状維持
+    assert controller._last_selected_session == "session-B"
 
 
 def test_paused_instruction_broadcast(monkeypatch, tmp_path):
