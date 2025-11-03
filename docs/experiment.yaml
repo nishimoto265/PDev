@@ -231,3 +231,13 @@
   - uv run pytest
   result: tests 40 passed
   notes: 長文ログも横スクロールなしで読みやすくなった
+- date: '2025-11-03'
+  time_utc: '00:05:00'
+  summary: ログビューをRichLogからLogへ移行
+  details:
+  - TextualのRichLogが初期幅を保持して再ラップしない問題に対処するため、Logウィジェットへ切り替え
+  - 1行ごとに改行を付加して書き込み、/log copy・/log saveの出力が期待どおりになるよう矯正
+  reproduce:
+  - uv run pytest
+  result: tests 40 passed
+  notes: Logは選択範囲の抽出もサポートするため、コピー挙動に影響はない

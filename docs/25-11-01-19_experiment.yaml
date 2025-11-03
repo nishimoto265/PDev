@@ -179,3 +179,14 @@
   - uv run pytest
   result: tests 40 passed
   notes: 長文ログも横スクロールなしで読みやすくなった
+- date: '2025-11-03'
+  time_utc: '00:05:00'
+  summary: ログビューをRichLogからLogへ移行
+  details:
+  - TextualのRichLogが初回幅78で固定される問題を避けるため、ログパネルをLogウィジェットへ変更
+  - write()で改行付きテキストを投入し、/log copy・/log save 経由でも正しい文末になるように調整
+  - 折り返しがCLI幅に追随することを確認するUIテストを再実行
+  reproduce:
+  - uv run pytest
+  result: tests 40 passed
+  notes: 選択コピーはLog.get_selection経由で従来どおり利用可能

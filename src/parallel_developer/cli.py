@@ -24,7 +24,7 @@ from contextlib import suppress
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Footer, Header, Input, OptionList, RichLog, Static
+from textual.widgets import Footer, Header, Input, Log, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 from textual.dom import NoScreen
 
@@ -185,23 +185,14 @@ class StatusPanel(Static):
         self.update("\n".join(lines))
 
 
-class EventLog(RichLog):
+class EventLog(Log):
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, highlight=True, markup=True, **kwargs)
-        self.wrap = True
-        self.auto_scroll = True
-        self.min_width = 0
+        super().__init__(*args, highlight=False, auto_scroll=True, **kwargs)
+        self.max_lines = None
 
     def log(self, text: str) -> None:
         for line in text.splitlines():
-            if self.markup:
-                renderable = Text.from_markup(line)
-            else:
-                renderable = Text(line)
-            renderable.no_wrap = False
-            renderable.overflow = "fold"
-            width = self.content_region.width if self.content_region.width else None
-            self.write(renderable, width=width, shrink=True)
+            self.write(f"{line}\n")
 
 
 class CommandHint(Static):
@@ -1178,8 +1169,11 @@ class ParallelDeveloperApp(App):
                 text, ending = extracted
                 final_text = text if ending is None else f"{text}{ending}"
                 return final_text.rstrip("\n"), True
-        lines = [strip.text.rstrip() for strip in self.log_panel.lines]
-        return "\n".join(lines).rstrip("\n"), False
+        lines = list(self.log_panel.lines)
+        if lines and lines[-1] == "":
+            lines = lines[:-1]
+        text = "\n".join(line.rstrip() for line in lines).rstrip("\n")
+        return text, False
 
     def _copy_log_to_clipboard(self) -> str:
         text, from_selection = self._collect_log_text()
