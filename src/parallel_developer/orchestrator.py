@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -407,9 +408,19 @@ class Orchestrator:
             instruction=boss_instruction,
         )
 
+        boss_metrics: Dict[str, Dict[str, Any]] = {}
+        if self._boss_mode == BossMode.REWRITE:
+            boss_metrics = self._wait_for_boss_scores(boss_session_id)
+            followup = self._build_boss_rewrite_followup()
+            if followup:
+                self._tmux.send_instruction_to_pane(
+                    pane_id=layout.boss_pane,
+                    instruction=followup,
+                )
         boss_completion = self._monitor.await_completion(session_ids=[boss_session_id])
         completion_info.update(boss_completion)
-        boss_metrics = self._extract_boss_scores(boss_session_id)
+        if not boss_metrics:
+            boss_metrics = self._extract_boss_scores(boss_session_id)
         return boss_session_id, boss_metrics
 
     # --------------------------------------------------------------------- #
@@ -648,6 +659,36 @@ class Orchestrator:
             f"{base}"
             "After the JSON response, send /done."
         )
+
+    def _build_boss_rewrite_followup(self) -> str:
+        if self._boss_mode != BossMode.REWRITE:
+            return ""
+        return (
+            "Boss integration phase:\n"
+            "You have already produced the JSON scoreboard for the workers.\n"
+            "Now stay in this boss workspace and deliver the final merged implementation.\n"
+            "- Review the worker outputs you just scored and decide how to combine or refine them.\n"
+            "- If one worker result is already ideal, copy it into this boss workspace; otherwise, refactor or merge the strongest parts.\n"
+            "Make all required edits here so this boss workspace becomes the final solution.\n"
+            "When the boss implementation is complete, respond with /done."
+        )
+
+    def _wait_for_boss_scores(self, boss_session_id: str, timeout: float = 120.0) -> Dict[str, Dict[str, Any]]:
+        start = time.time()
+        poll = getattr(self._monitor, "poll_interval", 1.0)
+        try:
+            interval = float(poll)
+            if interval <= 0:
+                interval = 1.0
+        except (TypeError, ValueError):
+            interval = 1.0
+        metrics: Dict[str, Dict[str, Any]] = {}
+        while time.time() - start < timeout:
+            metrics = self._extract_boss_scores(boss_session_id)
+            if metrics:
+                break
+            time.sleep(interval)
+        return metrics
 
     def _maybe_pause(self, env_var: str, message: str) -> None:
         if os.getenv(env_var) == "1":

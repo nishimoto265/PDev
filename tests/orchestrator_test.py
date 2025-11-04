@@ -321,3 +321,48 @@ def test_boss_instruction_rewrite_mode():
     assert "For each candidate" in text
     assert "After you emit the JSON scoreboard" in text
     assert "respond with /done" in text.lower()
+
+
+def test_rewrite_mode_sends_followup_prompt(dependencies):
+    tmux = dependencies["tmux"]
+    monitor = dependencies["monitor"]
+    monitor.get_last_assistant_message.side_effect = [
+        None,
+        json.dumps({
+            "scores": {
+                "worker-1": {"score": 90, "comment": "great"},
+                "worker-2": {"score": 70, "comment": "ok"},
+            }
+        }),
+        json.dumps({
+            "scores": {
+                "worker-1": {"score": 90, "comment": "great"},
+                "worker-2": {"score": 70, "comment": "ok"},
+            }
+        }),
+    ]
+
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=dependencies["worktree"],
+        monitor=monitor,
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        boss_mode=BossMode.REWRITE,
+    )
+
+    def selector(candidates, scoreboard=None):
+        scores = {candidate.key: 0.0 for candidate in candidates}
+        scores[candidates[0].key] = 1.0
+        return SelectionDecision(selected_key=candidates[0].key, scores=scores)
+
+    orchestrator.run_cycle(dependencies["instruction"], selector=selector)
+
+    boss_calls = [
+        call.kwargs["instruction"]
+        for call in tmux.send_instruction_to_pane.call_args_list
+        if call.kwargs.get("pane_id") == "pane-boss"
+    ]
+    assert len(boss_calls) >= 2
+    assert "Boss integration phase" in boss_calls[1]
