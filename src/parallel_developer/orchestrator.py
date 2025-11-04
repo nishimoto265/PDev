@@ -11,8 +11,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping,
 
 
 class BossMode(str, Enum):
+    SKIP = "skip"
     SCORE = "score"
-    SKIP = "select"
     REWRITE = "rewrite"
 
 

@@ -237,8 +237,8 @@ class CLIController:
             "/boss": {
                 "description": "Boss モードを切り替える",
                 "options": [
+                    CommandOption("skip", "skip"),
                     CommandOption("score", "score"),
-                    CommandOption("select", "select"),
                     CommandOption("rewrite", "rewrite"),
                 ],
             },
@@ -393,21 +393,20 @@ class CLIController:
                     {
                         "text": (
                             "現在の Boss モードは {mode} です。"
-                            " (score=採点のみ, select=採点スキップ, rewrite=再実装)"
+                            " (skip=採点スキップ, score=採点のみ, rewrite=再実装)"
                         ).format(mode=mode)
                     },
                 )
                 return
             value = str(option).lower()
             mapping = {
-                "score": BossMode.SCORE,
-                "select": BossMode.SKIP,
                 "skip": BossMode.SKIP,
+                "score": BossMode.SCORE,
                 "rewrite": BossMode.REWRITE,
             }
             new_mode = mapping.get(value)
             if new_mode is None:
-                self._emit("log", {"text": "使い方: /boss score | /boss select | /boss rewrite"})
+                self._emit("log", {"text": "使い方: /boss skip | /boss score | /boss rewrite"})
                 return
             if new_mode == self._config.boss_mode:
                 self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
