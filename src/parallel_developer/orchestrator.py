@@ -16,6 +16,7 @@ class OrchestrationResult:
     selected_session: str
     sessions_summary: Mapping[str, Any] = field(default_factory=dict)
     artifact: Optional["CycleArtifact"] = None
+    continue_requested: bool = False
 
 
 @dataclass(slots=True)
@@ -72,6 +73,7 @@ class Orchestrator:
         worker_count: int,
         session_name: str,
         main_session_hook: Optional[Callable[[str], None]] = None,
+        worker_decider: Optional[Callable[[Mapping[str, str], Mapping[str, Any], "CycleLayout"], bool]] = None,
     ) -> None:
         self._tmux = tmux_manager
         self._worktree = worktree_manager
@@ -81,9 +83,16 @@ class Orchestrator:
         self._session_name = session_name
         self._active_worker_sessions: List[str] = []
         self._main_session_hook: Optional[Callable[[str], None]] = main_session_hook
+        self._worker_decider = worker_decider
 
     def set_main_session_hook(self, hook: Optional[Callable[[str], None]]) -> None:
         self._main_session_hook = hook
+
+    def set_worker_decider(
+        self,
+        decider: Optional[Callable[[Mapping[str, str], Mapping[str, Any], CycleLayout], bool]],
+    ) -> None:
+        self._worker_decider = decider
 
     def run_cycle(
         self,
@@ -116,15 +125,6 @@ class Orchestrator:
 
         completion_info = self._await_worker_completion(fork_map)
 
-        boss_session_id, boss_metrics = self._run_boss_phase(
-            layout=layout,
-            main_session_id=main_session_id,
-            user_instruction=instruction.rstrip(),
-            completion_info=completion_info,
-        )
-
-        candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
-
         worker_sessions = {
             layout.pane_to_worker[pane_id]: session_id
             for pane_id, session_id in fork_map.items()
@@ -134,15 +134,45 @@ class Orchestrator:
             for pane_id in layout.worker_panes
             if pane_id in fork_map
         }
+
+        if self._worker_decider:
+            try:
+                continue_requested = self._worker_decider(fork_map, completion_info, layout)
+            except Exception:
+                continue_requested = False
+        else:
+            continue_requested = False
+
         artifact = CycleArtifact(
             main_session_id=main_session_id,
             worker_sessions=worker_sessions,
-            boss_session_id=boss_session_id,
+            boss_session_id=None,
             worker_paths=worker_paths,
-            boss_path=boss_path if boss_session_id else None,
+            boss_path=boss_path,
             instruction=formatted_instruction,
             tmux_session=self._session_name,
         )
+
+        if continue_requested:
+            artifact.selected_session_id = main_session_id
+            self._active_worker_sessions = []
+            return OrchestrationResult(
+                selected_session=main_session_id,
+                sessions_summary={},
+                artifact=artifact,
+                continue_requested=True,
+            )
+
+        boss_session_id, boss_metrics = self._run_boss_phase(
+            layout=layout,
+            main_session_id=main_session_id,
+            user_instruction=instruction.rstrip(),
+            completion_info=completion_info,
+        )
+
+        candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
+        artifact.boss_session_id = boss_session_id
+        artifact.boss_path = boss_path if boss_session_id else None
 
         if not candidates:
             scoreboard = {

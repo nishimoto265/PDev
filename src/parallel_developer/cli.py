@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Set
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, Mapping
 import platform
 import subprocess
 import shlex
@@ -31,7 +31,7 @@ from textual.widgets import Footer, Header, OptionList, RichLog, Static, TextAre
 from textual.widgets.option_list import Option
 from textual.dom import NoScreen
 
-from .orchestrator import CandidateInfo, OrchestrationResult, Orchestrator, SelectionDecision
+from .orchestrator import CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
 
@@ -208,6 +208,7 @@ class CLIController:
         self._last_tmux_manager: Optional[TmuxLayoutManager] = None
         self._active_orchestrator: Optional[Orchestrator] = None
         self._queued_instruction: Optional[str] = None
+        self._continue_future: Optional[Future] = None
         self._attach_manager = TmuxAttachManager()
         self._settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,6 +237,9 @@ class CLIController:
             "/resume": {
                 "description": "保存済みセッションを再開する",
                 "options_provider": self._build_resume_options,
+            },
+            "/continue": {
+                "description": "現行サイクルでワーカーへの追加指示を続ける",
             },
             "/log": {
                 "description": "ログをコピーするかファイルへ保存する",
@@ -337,6 +341,10 @@ class CLIController:
             return
 
         if name == "/done":
+            if self._continue_future and not self._continue_future.done():
+                self._continue_future.set_result(False)
+                self._emit("log", {"text": "/done を検知として扱い、採点フェーズへ進みます。"})
+                return
             if self._active_orchestrator:
                 count = self._active_orchestrator.force_complete_workers()
                 if count:
@@ -345,6 +353,14 @@ class CLIController:
                     self._emit("log", {"text": "完了扱いにするワーカーセッションが見つかりませんでした。"})
             else:
                 self._emit("log", {"text": "現在進行中のワーカークセッションがないため /done を適用できません。"})
+            return
+
+        if name == "/continue":
+            if self._continue_future and not self._continue_future.done():
+                self._continue_future.set_result(True)
+                self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
+            else:
+                self._emit("log", {"text": "/continue は現在利用できません。"})
             return
 
         if name == "/attach":
@@ -473,6 +489,8 @@ class CLIController:
                 self._cancelled_cycles.add(current_id)
             self._current_cycle_id = None
             self._running = False
+        if self._continue_future and not self._continue_future.done():
+            self._continue_future.set_result(False)
         self._paused = False
         self._emit("log", {"text": "現在のサイクルをキャンセルし、前の状態へ戻しました。"})
         self._emit_status("待機中")
@@ -533,6 +551,29 @@ class CLIController:
             "instruction": self._last_instruction,
         }
         self._cycle_history.append(snapshot)
+
+    def _handle_worker_decision(
+        self,
+        fork_map: Mapping[str, str],
+        completion_info: Mapping[str, Any],
+        layout: CycleLayout,
+    ) -> bool:
+        future = Future()
+        self._continue_future = future
+        self._emit(
+            "log",
+            {
+                "text": (
+                    "ワーカーの処理が完了しました。追加で作業させるには /continue を、"
+                    "評価へ進むには /done を入力してください。"
+                )
+            },
+        )
+        try:
+            decision = future.result()
+        finally:
+            self._continue_future = None
+        return bool(decision)
 
     def _record_history(self, text: str) -> None:
         entry = text.strip()
@@ -648,6 +689,9 @@ class CLIController:
         main_hook = getattr(orchestrator, "set_main_session_hook", None)
         if callable(main_hook):
             main_hook(self._on_main_session_started)
+        worker_decider = getattr(orchestrator, "set_worker_decider", None)
+        if callable(worker_decider):
+            worker_decider(self._handle_worker_decision)
 
         loop = asyncio.get_running_loop()
 
@@ -680,12 +724,20 @@ class CLIController:
 
         auto_attach_task: Optional[asyncio.Task[None]] = None
         cancelled = False
+        continued = False
         try:
             self._emit("log", {"text": f"指示を開始: {instruction}"})
             if self._attach_mode == "auto":
                 auto_attach_task = asyncio.create_task(self._handle_attach_command(force=False))
             result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
-            if cycle_id in self._cancelled_cycles:
+            continued = getattr(result, "continue_requested", False)
+            if continued:
+                self._last_selected_session = result.selected_session
+                self._active_main_session_id = result.selected_session
+                self._config.reuse_existing_session = True
+                self._last_scoreboard = {}
+                self._emit("log", {"text": "ワーカーを継続します。新しい指示を入力してください。"})
+            elif cycle_id in self._cancelled_cycles:
                 cancelled = True
                 self._cancelled_cycles.discard(cycle_id)
             else:
@@ -727,6 +779,8 @@ class CLIController:
                 self._queued_instruction = None
                 if queued:
                     asyncio.create_task(self.handle_input(queued))
+                return
+            if continued:
                 return
 
     def _resolve_selection(self, index: int) -> None:

@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import Future
 import platform
 import shlex
 import shutil
@@ -418,6 +419,26 @@ def test_done_command_forces_completion(monkeypatch, tmp_path):
     assert forced.get("called") is True
     log_messages = [payload["text"] for event, payload in events if event == "log"]
     assert any(" /done " in msg or "/done" in msg for msg in log_messages)
+
+
+def test_continue_command_sets_future(tmp_path):
+    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
+    future = Future()
+    controller._continue_future = future
+
+    _run_async(controller.execute_command("/continue"))
+
+    assert future.done() and future.result() is True
+
+
+def test_done_command_resolves_continue_future(tmp_path):
+    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
+    future = Future()
+    controller._continue_future = future
+
+    _run_async(controller.execute_command("/done"))
+
+    assert future.done() and future.result() is False
 
 
 def test_attach_auto_mode_skips_when_already_attached(monkeypatch, manifest_store, tmp_path):

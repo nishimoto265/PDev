@@ -177,6 +177,35 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert result.artifact.boss_session_id == "session-boss"
 
 
+def test_orchestrator_continue_skips_boss_phase(dependencies):
+    decider_called = []
+
+    def worker_decider(fork_map, completion, layout):
+        decider_called.append(True)
+        return True
+
+    orchestrator = Orchestrator(
+        tmux_manager=dependencies["tmux"],
+        worktree_manager=dependencies["worktree"],
+        monitor=dependencies["monitor"],
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        worker_decider=worker_decider,
+    )
+
+    orchestrator._run_boss_phase = Mock(name="run_boss_phase")
+
+    result = orchestrator.run_cycle(dependencies["instruction"], selector=lambda *_: SelectionDecision("boss", {}))
+
+    assert decider_called
+    orchestrator._run_boss_phase.assert_not_called()
+    dependencies["logger"].record_cycle.assert_not_called()
+    assert result.continue_requested is True
+    assert result.artifact is not None
+    assert result.artifact.main_session_id == "session-main"
+
+
 def test_orchestrator_reuses_main_session_without_resume(dependencies):
     orchestrator = Orchestrator(
         tmux_manager=dependencies["tmux"],
