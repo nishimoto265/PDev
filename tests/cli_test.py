@@ -1,4 +1,5 @@
 import asyncio
+import json
 from concurrent.futures import Future
 import platform
 import shlex
@@ -65,7 +66,7 @@ def test_status_command_outputs_information(manifest_store, tmp_path):
     assert status_events[-1]["message"] == "待機中"
 
 
-def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_path):
+def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_path, monkeypatch):
     events = []
 
     def handler(event_type, payload):
@@ -96,6 +97,13 @@ def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_
 
     captured_kwargs = {}
 
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    codex_config = home_dir / ".codex"
+    codex_config.mkdir(parents=True, exist_ok=True)
+    (codex_config / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
     def builder(**kwargs):
         captured_kwargs.update(kwargs)
         return orchestrator
@@ -113,6 +121,11 @@ def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_
     assert orchestrator.run_cycle.called
     assert captured_kwargs["worker_count"] == controller._config.worker_count
     assert captured_kwargs["session_name"] == controller._config.tmux_session
+    codex_home = captured_kwargs["codex_home"]
+    assert codex_home.exists()
+    assert codex_home != home_dir
+    assert (codex_home / ".codex" / "config.json").exists()
+    assert (codex_home / ".codex" / ".bootstrap_complete").exists()
     sessions = manifest_store.list_sessions()
     assert len(sessions) == 1
     manifest = manifest_store.load_manifest(sessions[0].session_id)
@@ -521,6 +534,121 @@ def test_attach_mode_persists_between_runs(tmp_path, monkeypatch):
     )
 
     assert controller2._attach_mode == "manual"
+
+
+def test_codex_home_shared_mode(monkeypatch, manifest_store, tmp_path):
+    home_dir = tmp_path / "global_home"
+    home_dir.mkdir()
+    (home_dir / ".codex").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+    monkeypatch.setenv("PARALLEL_DEV_CODEX_HOME_MODE", "shared")
+
+    captured_kwargs = {}
+
+    def builder(**kwargs):
+        captured_kwargs.update(kwargs)
+        orchestrator = Mock()
+        artifact = CycleArtifact(
+            main_session_id="session-main",
+            worker_sessions={},
+            boss_session_id=None,
+            worker_paths={},
+            boss_path=None,
+            instruction="",
+            tmux_session="parallel-dev-test",
+        )
+        artifact.selected_session_id = "session-main"
+        orchestrator.run_cycle.return_value = OrchestrationResult(
+            selected_session="session-main",
+            sessions_summary={"main": {"selected": True}},
+            artifact=artifact,
+        )
+        return orchestrator
+
+    controller = CLIController(
+        event_handler=lambda *_: None,
+        orchestrator_builder=builder,
+        manifest_store=manifest_store,
+        worktree_root=tmp_path,
+    )
+    controller._config.logs_root = tmp_path / "logs"
+    _run_async(controller.handle_input("Implement feature Y"))
+
+    assert captured_kwargs["codex_home"] == home_dir
+    assert not (home_dir / ".codex" / ".bootstrap_complete").exists()
+
+
+def test_codex_home_env_override(monkeypatch, manifest_store, tmp_path):
+    base_override = tmp_path / "override" / "{session}"
+    monkeypatch.setenv("PARALLEL_DEV_CODEX_HOME", str(base_override))
+
+    home_dir = tmp_path / "base_home"
+    home_dir.mkdir()
+    (home_dir / ".codex").mkdir(parents=True, exist_ok=True)
+    (home_dir / ".codex" / "profile.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
+    captured_kwargs = {}
+
+    def builder(**kwargs):
+        captured_kwargs.update(kwargs)
+        orchestrator = Mock()
+        artifact = CycleArtifact(
+            main_session_id="session-main",
+            worker_sessions={},
+            boss_session_id=None,
+            worker_paths={},
+            boss_path=None,
+            instruction="",
+            tmux_session="parallel-dev-test",
+        )
+        artifact.selected_session_id = "session-main"
+        orchestrator.run_cycle.return_value = OrchestrationResult(
+            selected_session="session-main",
+            sessions_summary={"main": {"selected": True}},
+            artifact=artifact,
+        )
+        return orchestrator
+
+    controller = CLIController(
+        event_handler=lambda *_: None,
+        orchestrator_builder=builder,
+        manifest_store=manifest_store,
+        worktree_root=tmp_path,
+    )
+    controller._config.logs_root = tmp_path / "logs"
+    session_specific = Path(str(base_override).replace("{session}", controller._session_namespace))
+
+    _run_async(controller.handle_input("Implement feature Z"))
+
+    assert captured_kwargs["codex_home"] == session_specific
+    assert (session_specific / ".codex" / "profile.json").exists()
+
+
+def test_codex_home_command_updates_mode(tmp_path):
+    controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
+    assert controller._codex_home_mode == "session"
+    _run_async(controller.handle_input("/codexhome shared"))
+    assert controller._codex_home_mode == "shared"
+    settings_path = tmp_path / ".parallel-dev" / "settings.json"
+    assert settings_path.exists()
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert data["codex_home_mode"] == "shared"
+
+
+def test_codex_home_command_blocked_by_env(tmp_path, monkeypatch):
+    events = []
+
+    def handler(event_type, payload):
+        events.append((event_type, payload))
+
+    monkeypatch.setenv("PARALLEL_DEV_CODEX_HOME_MODE", "shared")
+    controller = CLIController(event_handler=handler, worktree_root=tmp_path)
+
+    _run_async(controller.handle_input("/codexhome session"))
+    # 設定は変わらず session のまま
+    assert controller._codex_home_mode == "session"
+    assert any("環境変数" in payload.get("text", "") for event, payload in events if event == "log")
 
 
 def test_tmux_attach_manager_is_attached(monkeypatch):

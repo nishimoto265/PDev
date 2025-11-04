@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from concurrent.futures import Future
 import importlib.util
 import sys
@@ -214,6 +215,7 @@ class CLIController:
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._settings: Dict[str, object] = self._load_settings()
         self._attach_mode: str = str(self._settings.get("attach_mode", "auto"))
+        self._codex_home_mode: str = str(self._settings.get("codex_home_mode", "session"))
         self._session_namespace: str = self._config.session_id
         self._session_root: Path = self._worktree_root / ".parallel-dev" / "sessions" / self._session_namespace
         self._codex_home: Path = self._session_root / "codex-home"
@@ -225,6 +227,9 @@ class CLIController:
                     CommandOption("manual", "manual"),
                     CommandOption("now", "now"),
                 ],
+            },
+            "/codexhome": {
+                "description": "Codex HOME のモードを切り替える (session/shared)",
             },
             "/parallel": {
                 "description": "ワーカー数を設定する",
@@ -364,6 +369,37 @@ class CLIController:
                 self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
             else:
                 self._emit("log", {"text": "/continue は現在利用できません。"})
+            return
+
+        if name == "/codexhome":
+            env_override = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE")
+            if env_override:
+                self._emit(
+                    "log",
+                    {
+                        "text": (
+                            "環境変数 PARALLEL_DEV_CODEX_HOME_MODE が設定されているため、"
+                            "/codexhome での変更は無効です。"
+                        )
+                    },
+                )
+                return
+            if option is None:
+                self._emit(
+                    "log",
+                    {"text": f"現在の Codex HOME モードは {self._codex_home_mode} です。（session/shared）"},
+                )
+                return
+            mode = str(option).lower()
+            if mode not in {"session", "shared"}:
+                self._emit("log", {"text": "使い方: /codexhome session | /codexhome shared"})
+                return
+            if mode == self._codex_home_mode:
+                self._emit("log", {"text": f"Codex HOME モードは既に {mode} です。"})
+                return
+            self._codex_home_mode = mode
+            self._save_settings()
+            self._emit("log", {"text": f"Codex HOME モードを {mode} に設定しました。次のサイクルから適用されます。"})
             return
 
         if name == "/attach":
@@ -1030,11 +1066,63 @@ class CLIController:
         return logs_dir
 
     def _ensure_codex_home(self) -> Path:
-        self._session_root.mkdir(parents=True, exist_ok=True)
-        self._codex_home.mkdir(parents=True, exist_ok=True)
-        sessions_dir = self._codex_home / ".codex" / "sessions"
+        codex_home, mode = self._resolve_codex_home()
+        codex_home.mkdir(parents=True, exist_ok=True)
+        if mode == "session":
+            self._session_root.mkdir(parents=True, exist_ok=True)
+            self._bootstrap_codex_home(codex_home)
+        sessions_dir = codex_home / ".codex" / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        return self._codex_home
+        self._codex_home = codex_home
+        return codex_home
+
+    def _resolve_codex_home(self) -> tuple[Path, str]:
+        env_mode = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE", "").lower()
+        mode = env_mode if env_mode in {"session", "shared"} else self._codex_home_mode
+
+        env_path_raw = os.getenv("PARALLEL_DEV_CODEX_HOME")
+        if env_path_raw:
+            expanded = os.path.expandvars(os.path.expanduser(env_path_raw))
+            if "{session}" in expanded:
+                resolved = expanded.replace("{session}", self._session_namespace)
+                return Path(resolved), mode
+            path = Path(expanded)
+            if mode == "session" and env_mode == "":
+                return path / self._session_namespace, mode
+            return path, mode
+
+        if mode == "shared":
+            return Path.home(), mode
+        return self._session_root / "codex-home", mode
+
+    def _bootstrap_codex_home(self, codex_home: Path) -> None:
+        global_codex = Path.home() / ".codex"
+        if codex_home == Path.home():
+            return
+        target_codex = codex_home / ".codex"
+        sentinel = target_codex / ".bootstrap_complete"
+        if sentinel.exists():
+            return
+        if not global_codex.exists():
+            return
+        target_codex.mkdir(parents=True, exist_ok=True)
+        for item in global_codex.iterdir():
+            if item.name == "sessions":
+                continue
+            destination = target_codex / item.name
+            if destination.exists():
+                continue
+            if item.is_dir():
+                shutil.copytree(item, destination, dirs_exist_ok=True)
+            else:
+                try:
+                    shutil.copy2(item, destination)
+                except OSError:
+                    continue
+        try:
+            sentinel.write_text(datetime.utcnow().isoformat(timespec="seconds"), encoding="utf-8")
+        except OSError:
+            pass
 
     async def _wait_for_session(self, session_name: str, attempts: int = 20, delay: float = 0.25) -> bool:
         for _ in range(attempts):
@@ -1054,6 +1142,7 @@ class CLIController:
     def _save_settings(self) -> None:
         data = dict(self._settings)
         data["attach_mode"] = self._attach_mode
+        data["codex_home_mode"] = self._codex_home_mode
         try:
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             self._settings = data

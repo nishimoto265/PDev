@@ -338,6 +338,8 @@
   - TmuxLayoutManagerが`env HOME=<session codex-home>`付きでcodex/codex resumeを送信するよう変更し、Boss/worker/メインすべてを同一HOMEに統一
   - build_orchestratorとCLIコントローラからセッションnamespaceとcodex-homeを渡すよう見直し、CodexMonitorには専用`.codex/sessions`を設定
   - Worktree・tmux・builder・orchestratorテストを更新し、セッション分離とenv注入を検証するケースを追加
+  - `/codexhome` コマンドで session/shared を切り替えられるようにし、設定ファイルへ保存する処理を追加
+  - `PARALLEL_DEV_CODEX_HOME(_MODE)` 環境変数でCodex HOMEを外部指定できるようにし、初回ブートストラップで`~/.codex`構成をコピーする
   reproduce:
   - uv run pytest
   result: tests 63 passed
