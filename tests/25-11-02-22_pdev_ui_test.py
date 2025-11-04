@@ -118,9 +118,33 @@ async def test_log_command_copy() -> None:
         log_widget.log("beta")
         await pilot.pause()
         await app.controller.execute_command("/log", "copy")
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_single_press_clears_input() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
         await pilot.pause()
-        assert "alpha" in app.clipboard
-        assert "beta" in app.clipboard
+        command_input = app.query_one("#command", CommandTextArea)
+        command_input.text = "hello"
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert command_input.text == ""
+        assert app._ctrl_c_armed is True
+        assert app.is_running
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_double_press_exits() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert app.is_running
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert not app.is_running
 
 
 @pytest.mark.asyncio

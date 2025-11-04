@@ -1337,7 +1337,9 @@ class ParallelDeveloperApp(App):
         self._ctrl_c_armed_at = now
         if self.command_input:
             self._set_command_text("")
-            self.command_input.action_cursor_end()
+            cursor_reset = getattr(self.command_input, "action_cursor_line_start", None)
+            if callable(cursor_reset):
+                cursor_reset()
         self.controller.history_reset()
         self._notify_status("Ctrl+C をもう一度押すと終了します。", also_log=False)
         return True
