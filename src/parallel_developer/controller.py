@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set, Mapping
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, Mapping, Awaitable
 import platform
 import subprocess
 import shlex
@@ -146,6 +146,14 @@ class CommandOption:
     value: object
 
 
+@dataclass
+class CommandSpecEntry:
+    description: str
+    handler: Callable[[Optional[object]], Awaitable[None]]
+    options: Optional[List[CommandOption]] = None
+    options_provider: Optional[Callable[[], List[CommandOption]]] = None
+
+
 class CLIController:
     """Core orchestration controller decoupled from Textual UI."""
 
@@ -195,57 +203,7 @@ class CLIController:
         self._session_namespace: str = self._config.session_id
         self._session_root: Path = self._worktree_root / ".parallel-dev" / "sessions" / self._session_namespace
         self._codex_home: Path = self._session_root / "codex-home"
-        self._command_specs: Dict[str, Dict[str, object]] = {
-            "/attach": {
-                "description": "tmux セッションへの接続モードを切り替える、または即座に接続する",
-                "options": [
-                    CommandOption("auto", "auto"),
-                    CommandOption("manual", "manual"),
-                    CommandOption("now", "now"),
-                ],
-            },
-            "/boss": {
-                "description": "Boss モードを切り替える",
-                "options": [
-                    CommandOption("skip", "skip"),
-                    CommandOption("score", "score"),
-                    CommandOption("rewrite", "rewrite"),
-                ],
-            },
-            "/codexhome": {
-                "description": "Codex HOME のモードを切り替える (session/shared)",
-            },
-            "/parallel": {
-                "description": "ワーカー数を設定する",
-                "options": [CommandOption(str(n), str(n)) for n in range(1, 5)],
-            },
-            "/mode": {
-                "description": "実行モードを切り替える",
-                "options": [
-                    CommandOption("main", "main"),
-                    CommandOption("parallel", "parallel"),
-                ],
-            },
-            "/resume": {
-                "description": "保存済みセッションを再開する",
-                "options_provider": self._build_resume_options,
-            },
-            "/continue": {
-                "description": "現行サイクルでワーカーへの追加指示を続ける",
-            },
-            "/log": {
-                "description": "ログをコピーするかファイルへ保存する",
-                "options": [
-                    CommandOption("copy", "copy"),
-                    CommandOption("save", "save"),
-                ],
-            },
-            "/status": {"description": "現在の状態を表示する"},
-            "/scoreboard": {"description": "直近のスコアボードを表示する"},
-            "/done": {"description": "全ワーカーに /done を送信して採点フェーズへ移行する"},
-            "/help": {"description": "コマンド一覧を表示する"},
-            "/exit": {"description": "CLI を終了する"},
-        }
+        self._command_specs: Dict[str, CommandSpecEntry] = self._build_command_specs()
 
     async def handle_input(self, user_input: str) -> None:
         text = user_input.strip()
@@ -290,21 +248,21 @@ class CLIController:
         for name in sorted(self._command_specs.keys()):
             if name.startswith(prefix):
                 spec = self._command_specs[name]
-                suggestions.append(CommandSuggestion(name=name, description=spec["description"]))
+                suggestions.append(CommandSuggestion(name=name, description=spec.description))
         if not suggestions and prefix == "/":
             for name in sorted(self._command_specs.keys()):
                 spec = self._command_specs[name]
-                suggestions.append(CommandSuggestion(name=name, description=spec["description"]))
+                suggestions.append(CommandSuggestion(name=name, description=spec.description))
         return suggestions
 
     def get_command_options(self, name: str) -> List[CommandOption]:
         spec = self._command_specs.get(name)
         if not spec:
             return []
-        if "options_provider" in spec:
-            return spec["options_provider"]()
-        if "options" in spec:
-            return [CommandOption(item.label, item.value) for item in spec["options"]]
+        if spec.options_provider:
+            return spec.options_provider()
+        if spec.options:
+            return list(spec.options)
         return []
 
     async def execute_command(self, name: str, option: Optional[object] = None) -> None:
@@ -312,198 +270,260 @@ class CLIController:
         if spec is None:
             self._emit("log", {"text": f"未知のコマンドです: {name}"})
             return
+        await spec.handler(option)
 
-        if name == "/exit":
-            self._emit("quit", {})
+    def _build_command_specs(self) -> Dict[str, CommandSpecEntry]:
+        return {
+            "/attach": CommandSpecEntry(
+                "tmux セッションへの接続モードを切り替える、または即座に接続する",
+                self._cmd_attach,
+                options=[
+                    CommandOption("auto", "auto"),
+                    CommandOption("manual", "manual"),
+                    CommandOption("now", "now"),
+                ],
+            ),
+            "/boss": CommandSpecEntry(
+                "Boss モードを切り替える",
+                self._cmd_boss,
+                options=[
+                    CommandOption("skip", "skip"),
+                    CommandOption("score", "score"),
+                    CommandOption("rewrite", "rewrite"),
+                ],
+            ),
+            "/codexhome": CommandSpecEntry(
+                "Codex HOME のモードを切り替える (session/shared)",
+                self._cmd_codex_home,
+            ),
+            "/parallel": CommandSpecEntry(
+                "ワーカー数を設定する",
+                self._cmd_parallel,
+                options=[CommandOption(str(n), str(n)) for n in range(1, 5)],
+            ),
+            "/mode": CommandSpecEntry(
+                "実行モードを切り替える",
+                self._cmd_mode,
+                options=[CommandOption("main", "main"), CommandOption("parallel", "parallel")],
+            ),
+            "/resume": CommandSpecEntry(
+                "保存済みセッションを再開する",
+                self._cmd_resume,
+                options_provider=self._build_resume_options,
+            ),
+            "/continue": CommandSpecEntry(
+                "現行サイクルでワーカーへの追加指示を続ける",
+                self._cmd_continue,
+            ),
+            "/log": CommandSpecEntry(
+                "ログをコピーするかファイルへ保存する",
+                self._cmd_log,
+                options=[
+                    CommandOption("copy", "copy"),
+                    CommandOption("save", "save"),
+                ],
+            ),
+            "/status": CommandSpecEntry(
+                "現在の状態を表示する",
+                self._cmd_status,
+            ),
+            "/scoreboard": CommandSpecEntry(
+                "直近のスコアボードを表示する",
+                self._cmd_scoreboard,
+            ),
+            "/done": CommandSpecEntry(
+                "全ワーカーに /done を送信して採点フェーズへ移行する",
+                self._cmd_done,
+            ),
+            "/help": CommandSpecEntry(
+                "コマンド一覧を表示する",
+                self._cmd_help,
+            ),
+            "/exit": CommandSpecEntry(
+                "CLI を終了する",
+                self._cmd_exit,
+            ),
+        }
+
+    async def _cmd_exit(self, option: Optional[object]) -> None:
+        self._emit("quit", {})
+
+    async def _cmd_help(self, option: Optional[object]) -> None:
+        lines = ["利用可能なコマンド:"]
+        for name in sorted(self._command_specs.keys()):
+            spec = self._command_specs[name]
+            lines.append(f"  {name:10s} : {spec.description}")
+        self._emit("log", {"text": "\n".join(lines)})
+
+    async def _cmd_status(self, option: Optional[object]) -> None:
+        self._emit_status("待機中")
+
+    async def _cmd_scoreboard(self, option: Optional[object]) -> None:
+        self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
+
+    async def _cmd_done(self, option: Optional[object]) -> None:
+        if self._continue_future and not self._continue_future.done():
+            self._continue_future.set_result(False)
+            self._emit("log", {"text": "/done を検知として扱い、採点フェーズへ進みます。"})
             return
-
-        if name == "/help":
-            help_lines = ["利用可能なコマンド:"]
-            for cmd in sorted(self._command_specs.keys()):
-                help_lines.append(f"  {cmd:10s} : {self._command_specs[cmd]['description']}")
-            self._emit("log", {"text": "\n".join(help_lines)})
-            return
-
-        if name == "/status":
-            self._emit_status("待機中")
-            return
-
-        if name == "/scoreboard":
-            self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
-            return
-
-        if name == "/done":
-            if self._continue_future and not self._continue_future.done():
-                self._continue_future.set_result(False)
-                self._emit("log", {"text": "/done を検知として扱い、採点フェーズへ進みます。"})
-                return
-            if self._active_orchestrator:
-                count = self._active_orchestrator.force_complete_workers()
-                if count:
-                    self._emit("log", {"text": f"/done を検知として扱い、{count} ワーカーを完了済みに設定しました。"})
-                else:
-                    self._emit("log", {"text": "完了扱いにするワーカーセッションが見つかりませんでした。"})
+        if self._active_orchestrator:
+            count = self._active_orchestrator.force_complete_workers()
+            if count:
+                self._emit("log", {"text": f"/done を検知として扱い、{count} ワーカーを完了済みに設定しました。"})
             else:
-                self._emit("log", {"text": "現在進行中のワーカークセッションがないため /done を適用できません。"})
-            return
+                self._emit("log", {"text": "完了扱いにするワーカーセッションが見つかりませんでした。"})
+        else:
+            self._emit("log", {"text": "現在進行中のワーカークセッションがないため /done を適用できません。"})
 
-        if name == "/continue":
-            if self._continue_future and not self._continue_future.done():
-                self._continue_future.set_result(True)
-                self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
-            else:
-                self._emit("log", {"text": "/continue は現在利用できません。"})
-            return
+    async def _cmd_continue(self, option: Optional[object]) -> None:
+        if self._continue_future and not self._continue_future.done():
+            self._continue_future.set_result(True)
+            self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
+        else:
+            self._emit("log", {"text": "/continue は現在利用できません。"})
 
-        if name == "/boss":
-            if option is None:
-                mode = self._config.boss_mode.value
-                self._emit(
-                    "log",
-                    {
-                        "text": (
-                            "現在の Boss モードは {mode} です。"
-                            " (skip=採点スキップ, score=採点のみ, rewrite=再実装)"
-                        ).format(mode=mode)
-                    },
-                )
-                return
-            value = str(option).lower()
-            mapping = {
-                "skip": BossMode.SKIP,
-                "score": BossMode.SCORE,
-                "rewrite": BossMode.REWRITE,
-            }
-            new_mode = mapping.get(value)
-            if new_mode is None:
-                self._emit("log", {"text": "使い方: /boss skip | /boss score | /boss rewrite"})
-                return
-            if new_mode == self._config.boss_mode:
-                self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
-                return
-            self._config.boss_mode = new_mode
+    async def _cmd_boss(self, option: Optional[object]) -> None:
+        if option is None:
+            mode = self._config.boss_mode.value
+            self._emit(
+                "log",
+                {
+                    "text": (
+                        "現在の Boss モードは {mode} です。"
+                        " (skip=採点スキップ, score=採点のみ, rewrite=再実装)"
+                    ).format(mode=mode)
+                },
+            )
+            return
+        value = str(option).lower()
+        mapping = {
+            "skip": BossMode.SKIP,
+            "score": BossMode.SCORE,
+            "rewrite": BossMode.REWRITE,
+        }
+        new_mode = mapping.get(value)
+        if new_mode is None:
+            self._emit("log", {"text": "使い方: /boss skip | /boss score | /boss rewrite"})
+            return
+        if new_mode == self._config.boss_mode:
+            self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
+            return
+        self._config.boss_mode = new_mode
+        self._save_settings()
+        self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
+
+    async def _cmd_codex_home(self, option: Optional[object]) -> None:
+        env_override = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE")
+        if env_override:
+            self._emit(
+                "log",
+                {
+                    "text": (
+                        "環境変数 PARALLEL_DEV_CODEX_HOME_MODE が設定されているため、"
+                        "/codexhome での変更は無効です。"
+                    )
+                },
+            )
+            return
+        if option is None:
+            self._emit(
+                "log",
+                {"text": f"現在の Codex HOME モードは {self._codex_home_mode} です。（session/shared）"},
+            )
+            return
+        mode = str(option).lower()
+        if mode not in {"session", "shared"}:
+            self._emit("log", {"text": "使い方: /codexhome session | /codexhome shared"})
+            return
+        if mode == self._codex_home_mode:
+            self._emit("log", {"text": f"Codex HOME モードは既に {mode} です。"})
+            return
+        self._codex_home_mode = mode
+        self._save_settings()
+        self._emit("log", {"text": f"Codex HOME モードを {mode} に設定しました。次のサイクルから適用されます。"})
+
+    async def _cmd_attach(self, option: Optional[object]) -> None:
+        mode = str(option).lower() if option is not None else None
+        if mode in {"auto", "manual"}:
+            self._attach_mode = mode
+            self._emit("log", {"text": f"/attach モードを {mode} に設定しました。"})
             self._save_settings()
-            self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
             return
-
-        if name == "/codexhome":
-            env_override = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE")
-            if env_override:
-                self._emit(
-                    "log",
-                    {
-                        "text": (
-                            "環境変数 PARALLEL_DEV_CODEX_HOME_MODE が設定されているため、"
-                            "/codexhome での変更は無効です。"
-                        )
-                    },
-                )
-                return
-            if option is None:
-                self._emit(
-                    "log",
-                    {"text": f"現在の Codex HOME モードは {self._codex_home_mode} です。（session/shared）"},
-                )
-                return
-            mode = str(option).lower()
-            if mode not in {"session", "shared"}:
-                self._emit("log", {"text": "使い方: /codexhome session | /codexhome shared"})
-                return
-            if mode == self._codex_home_mode:
-                self._emit("log", {"text": f"Codex HOME モードは既に {mode} です。"})
-                return
-            self._codex_home_mode = mode
-            self._save_settings()
-            self._emit("log", {"text": f"Codex HOME モードを {mode} に設定しました。次のサイクルから適用されます。"})
+        if mode == "now" or option is None:
+            await self._handle_attach_command(force=True)
             return
+        self._emit("log", {"text": "使い方: /attach [auto|manual|now]"})
 
-        if name == "/attach":
-            mode = (str(option).lower() if option is not None else None)
-            if mode in {"auto", "manual"}:
-                self._attach_mode = mode
-                self._emit("log", {"text": f"/attach モードを {mode} に設定しました。"})
-                self._save_settings()
-                return
-            if mode == "now" or option is None:
-                await self._handle_attach_command(force=True)
-                return
-            self._emit("log", {"text": "使い方: /attach [auto|manual|now]"})
+    async def _cmd_parallel(self, option: Optional[object]) -> None:
+        if option is None:
+            self._emit("log", {"text": "使い方: /parallel <ワーカー数>"})
             return
+        try:
+            value = int(str(option))
+        except ValueError:
+            self._emit("log", {"text": "ワーカー数は数字で指定してください。"})
+            return
+        if value < 1:
+            self._emit("log", {"text": "ワーカー数は1以上で指定してください。"})
+            return
+        self._config.worker_count = value
+        self._emit_status("設定を更新しました。")
 
-        if name == "/parallel":
-            if option is None:
-                self._emit("log", {"text": "使い方: /parallel <ワーカー数>"})
-                return
+    async def _cmd_mode(self, option: Optional[object]) -> None:
+        mode = str(option).lower() if option is not None else None
+        if mode not in {"main", "parallel"}:
+            self._emit("log", {"text": "使い方: /mode main | /mode parallel"})
+            return
+        self._config.mode = SessionMode(mode)
+        self._emit_status("設定を更新しました。")
+
+    async def _cmd_resume(self, option: Optional[object]) -> None:
+        if option is None:
+            self._list_sessions()
+            return
+        index: Optional[int] = None
+        if isinstance(option, int):
+            index = option
+        else:
             try:
-                value = int(str(option))
+                index = int(str(option))
             except ValueError:
-                self._emit("log", {"text": "ワーカー数は数字で指定してください。"})
-                return
-            if value < 1:
-                self._emit("log", {"text": "ワーカー数は1以上で指定してください。"})
-                return
-            self._config.worker_count = value
-            self._emit_status("設定を更新しました。")
+                index = self._find_resume_index_by_session(str(option))
+        if index is None:
+            self._emit("log", {"text": "指定されたセッションが見つかりません。"})
             return
+        self._load_session(index)
 
-        if name == "/mode":
-            mode = (str(option).lower() if option is not None else None)
-            if mode not in {"main", "parallel"}:
-                self._emit("log", {"text": "使い方: /mode main | /mode parallel"})
-                return
-            self._config.mode = SessionMode(mode)
-            self._emit_status("設定を更新しました。")
+    async def _cmd_log(self, option: Optional[object]) -> None:
+        if option is None:
+            self._emit(
+                "log",
+                {
+                    "text": "使い方: /log copy | /log save <path>\n"
+                    "  copy : 現在のログをクリップボードへコピー\n"
+                    "  save : 指定パスへログを書き出す"
+                },
+            )
             return
-
-        if name == "/resume":
-            if option is None:
-                self._list_sessions()
-                return
-            index: Optional[int] = None
-            if isinstance(option, int):
-                index = option
-            else:
-                try:
-                    index = int(str(option))
-                except ValueError:
-                    index = self._find_resume_index_by_session(str(option))
-            if index is None:
-                self._emit("log", {"text": "指定されたセッションが見つかりません。"})
-                return
-            self._load_session(index)
+        action: str
+        argument: Optional[str] = None
+        if isinstance(option, str):
+            sub_parts = option.split(maxsplit=1)
+            action = sub_parts[0].lower()
+            if len(sub_parts) > 1:
+                argument = sub_parts[1].strip()
+        else:
+            action = str(option).lower()
+        if action == "copy":
+            self._emit("log_copy", {})
             return
-
-        if name == "/log":
-            if option is None:
-                self._emit(
-                    "log",
-                    {
-                        "text": "使い方: /log copy | /log save <path>\n"
-                        "  copy : 現在のログをクリップボードへコピー\n"
-                        "  save : 指定パスへログを書き出す"
-                    },
-                )
+        if action == "save":
+            if not argument:
+                self._emit("log", {"text": "保存先パスを指定してください。例: /log save logs/output.log"})
                 return
-            action: str
-            argument: Optional[str] = None
-            if isinstance(option, str):
-                sub_parts = option.split(maxsplit=1)
-                action = sub_parts[0].lower()
-                if len(sub_parts) > 1:
-                    argument = sub_parts[1].strip()
-            else:
-                action = str(option).lower()
-            if action == "copy":
-                self._emit("log_copy", {})
-                return
-            if action == "save":
-                if not argument:
-                    self._emit("log", {"text": "保存先パスを指定してください。例: /log save logs/output.log"})
-                    return
-                self._emit("log_save", {"path": argument})
-                return
-            self._emit("log", {"text": "使い方: /log copy | /log save <path>"})
+            self._emit("log_save", {"path": argument})
             return
+        self._emit("log", {"text": "使い方: /log copy | /log save <path>"})
 
     def _find_resume_index_by_session(self, token: str) -> Optional[int]:
         if not self._resume_options:
