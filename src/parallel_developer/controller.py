@@ -20,6 +20,7 @@ from subprocess import PIPE
 from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
+from .settings_store import SettingsStore
 
 
 class SessionMode(str, Enum):
@@ -190,12 +191,11 @@ class CLIController:
         self._queued_instruction: Optional[str] = None
         self._continue_future: Optional[Future] = None
         self._attach_manager = TmuxAttachManager()
-        self._settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
-        self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self._settings: Dict[str, object] = self._load_settings()
-        self._attach_mode: str = str(self._settings.get("attach_mode", "auto"))
-        self._codex_home_mode: str = str(self._settings.get("codex_home_mode", "session"))
-        saved_boss_mode = str(self._settings.get("boss_mode", BossMode.SCORE.value))
+        settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
+        self._settings_store = SettingsStore(settings_path)
+        self._attach_mode: str = self._settings_store.attach_mode
+        self._codex_home_mode: str = self._settings_store.codex_home_mode
+        saved_boss_mode = self._settings_store.boss_mode
         try:
             self._config.boss_mode = BossMode(saved_boss_mode)
         except ValueError:
@@ -409,7 +409,7 @@ class CLIController:
             self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
             return
         self._config.boss_mode = new_mode
-        self._save_settings()
+        self._settings_store.boss_mode = new_mode.value
         self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
 
     async def _cmd_codex_home(self, option: Optional[object]) -> None:
@@ -439,7 +439,7 @@ class CLIController:
             self._emit("log", {"text": f"Codex HOME モードは既に {mode} です。"})
             return
         self._codex_home_mode = mode
-        self._save_settings()
+        self._settings_store.codex_home_mode = mode
         self._emit("log", {"text": f"Codex HOME モードを {mode} に設定しました。次のサイクルから適用されます。"})
 
     async def _cmd_attach(self, option: Optional[object]) -> None:
@@ -447,7 +447,7 @@ class CLIController:
         if mode in {"auto", "manual"}:
             self._attach_mode = mode
             self._emit("log", {"text": f"/attach モードを {mode} に設定しました。"})
-            self._save_settings()
+            self._settings_store.attach_mode = mode
             return
         if mode == "now" or option is None:
             await self._handle_attach_command(force=True)
@@ -1167,25 +1167,6 @@ class CLIController:
                 return True
             await asyncio.sleep(delay)
         return False
-
-    def _load_settings(self) -> Dict[str, object]:
-        if not self._settings_path.exists():
-            return {}
-        try:
-            return json.loads(self._settings_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-    def _save_settings(self) -> None:
-        data = dict(self._settings)
-        data["attach_mode"] = self._attach_mode
-        data["codex_home_mode"] = self._codex_home_mode
-        data["boss_mode"] = self._config.boss_mode.value
-        try:
-            self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            self._settings = data
-        except OSError:
-            pass
 
     def _build_manifest(self, result: OrchestrationResult, logs_dir: Path) -> SessionManifest:
         assert result.artifact is not None
