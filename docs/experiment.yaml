@@ -330,3 +330,15 @@
   - uv run python - <<'PY'  # CodexMonitor が同一ロールアウトIDを重複検出することを確認
   result: 手動検証で双方のシナリオが再現し、複数起動時は競合が避けられないことを確認
   notes: 同時稼働を許容するにはワークツリーとセッション検知をセッションIDごとに分離し、設定ファイルへの書き込みも排他制御を導入する必要がある
+- date: '2025-11-04'
+  time_utc: '11:03:00'
+  summary: セッション専用ワークツリーとCodex HOME分離を実装
+  details:
+  - WorktreeManagerにsession_namespaceを導入し、`.parallel-dev/sessions/<session_id>/worktrees/{worker-n,boss}`へワークツリーを再配置
+  - TmuxLayoutManagerが`env HOME=<session codex-home>`付きでcodex/codex resumeを送信するよう変更し、Boss/worker/メインすべてを同一HOMEに統一
+  - build_orchestratorとCLIコントローラからセッションnamespaceとcodex-homeを渡すよう見直し、CodexMonitorには専用`.codex/sessions`を設定
+  - Worktree・tmux・builder・orchestratorテストを更新し、セッション分離とenv注入を検証するケースを追加
+  reproduce:
+  - uv run pytest
+  result: tests 63 passed
+  notes: 複数 pdev を並行起動しても互いのworktreeとCodexロールアウトが干渉しない構成へ移行

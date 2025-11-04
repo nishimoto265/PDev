@@ -19,16 +19,31 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
     log_manager = Mock(name="LogManager")
     orchestrator_instance = Mock(name="OrchestratorInstance")
 
+    def fake_tmux(**kwargs):
+        assert kwargs["session_namespace"] == "namespace"
+        assert kwargs["codex_home"] == Path("codex-home")
+        return tmux
+
     monkeypatch.setattr(
         "parallel_developer.cli.TmuxLayoutManager",
-        lambda session_name, worker_count, monitor, root_path, **_: tmux,
+        fake_tmux,
     )
+
+    def fake_worktree(**kwargs):
+        assert kwargs["session_namespace"] == "namespace"
+        return worktree
+
     monkeypatch.setattr(
-        "parallel_developer.cli.WorktreeManager", lambda **_: worktree
+        "parallel_developer.cli.WorktreeManager", fake_worktree
     )
+
+    def fake_monitor(**kwargs):
+        assert kwargs["codex_sessions_root"] == Path("codex-home/.codex/sessions")
+        return monitor
+
     monkeypatch.setattr(
         "parallel_developer.cli.CodexMonitor",
-        lambda logs_dir, session_map_path, poll_interval=1.0: monitor,
+        fake_monitor,
     )
     monkeypatch.setattr("parallel_developer.cli.LogManager", lambda **_: log_manager)
     monkeypatch.setattr(
@@ -36,7 +51,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
         lambda **kwargs: orchestrator_instance,
     )
 
-    result = cli.build_orchestrator(worker_count=3, log_dir=None)
+    result = cli.build_orchestrator(worker_count=3, log_dir=None, session_namespace="namespace", codex_home=Path("codex-home"))
 
     assert result is orchestrator_instance
     tmux.ensure_layout.assert_not_called()

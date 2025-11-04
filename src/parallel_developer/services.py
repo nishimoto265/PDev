@@ -28,6 +28,8 @@ class TmuxLayoutManager:
         startup_delay: float = 0.0,
         backtrack_delay: float = 0.2,
         reuse_existing_session: bool = False,
+        session_namespace: Optional[str] = None,
+        codex_home: Optional[Path] = None,
     ) -> None:
         self.session_name = session_name
         self.worker_count = worker_count
@@ -37,6 +39,8 @@ class TmuxLayoutManager:
         self.startup_delay = startup_delay
         self.backtrack_delay = backtrack_delay
         self.reuse_existing_session = reuse_existing_session
+        self.session_namespace = session_namespace
+        self.codex_home = Path(codex_home) if codex_home else None
         self._server = libtmux.Server()
 
     def set_boss_path(self, path: Path) -> None:
@@ -77,25 +81,28 @@ class TmuxLayoutManager:
         window.split_window(attach=False)
 
     def launch_main_session(self, *, pane_id: str) -> None:
+        codex = self._codex_command("codex")
         command = (
             f"cd {shlex.quote(str(self.root_path))} && "
-            "codex"
+            f"{codex}"
         )
         self._send_command(pane_id, command)
         self._maybe_wait()
 
     def launch_boss_session(self, *, pane_id: str) -> None:
+        codex = self._codex_command("codex")
         command = (
             f"cd {shlex.quote(str(self.boss_path))} && "
-            "codex"
+            f"{codex}"
         )
         self._send_command(pane_id, command)
         self._maybe_wait()
 
     def resume_session(self, *, pane_id: str, workdir: Path, session_id: str) -> None:
+        codex = self._codex_command(f"codex resume {shlex.quote(str(session_id))}")
         command = (
             f"cd {shlex.quote(str(workdir))} && "
-            f"codex resume {shlex.quote(str(session_id))}"
+            f"{codex}"
         )
         self._send_command(pane_id, command)
         self._maybe_wait()
@@ -104,7 +111,7 @@ class TmuxLayoutManager:
         self.interrupt_pane(pane_id=pane_id)
         command = (
             f"cd {shlex.quote(str(boss_path))} && "
-            f"codex resume {shlex.quote(str(base_session_id))}"
+            f"{self._codex_command(f'codex resume {shlex.quote(str(base_session_id))}')}"
         )
         self._send_command(pane_id, command)
         self._maybe_wait()
@@ -137,7 +144,7 @@ class TmuxLayoutManager:
             self.interrupt_pane(pane_id=pane_id)
             command = (
                 f"cd {shlex.quote(str(worker_path))} && "
-                f"codex resume {shlex.quote(str(base_session_id))}"
+                f"{self._codex_command(f'codex resume {shlex.quote(str(base_session_id))}')}"
             )
             self._send_command(pane_id, command)
         self._maybe_wait()
@@ -174,7 +181,7 @@ class TmuxLayoutManager:
 
     def promote_to_main(self, *, session_id: str, pane_id: str) -> None:
         pane = self._get_pane(pane_id)
-        pane.send_keys(f"codex resume {session_id}", enter=True)
+        pane.send_keys(self._codex_command(f"codex resume {shlex.quote(str(session_id))}"), enter=True)
 
     def interrupt_pane(self, *, pane_id: str) -> None:
         pane = self._get_pane(pane_id)
@@ -229,19 +236,26 @@ class TmuxLayoutManager:
         payload = text.replace("\r\n", "\n")
         pane.send_keys(f"\x1b[200~{payload}\x1b[201~", enter=True)
 
+    def _codex_command(self, command: str) -> str:
+        if self.codex_home:
+            home = shlex.quote(str(self.codex_home))
+            return f"env HOME={home} {command}"
+        return command
+
 
 class WorktreeManager:
     """Manage git worktrees for each worker."""
 
-    def __init__(self, root: Path, worker_count: int) -> None:
+    def __init__(self, root: Path, worker_count: int, session_namespace: Optional[str] = None) -> None:
         self.root = Path(root)
         self.worker_count = worker_count
+        self.session_namespace = session_namespace
         self._repo = git.Repo(self.root)
         self._ensure_repo_initialized()
-        self.worktrees_dir = self.root / ".parallel-dev" / "worktrees"
-        self.boss_path = self.root / ".parallel-dev" / "boss"
-        self._worker_branch_template = "parallel-dev/{name}"
-        self._boss_branch = "parallel-dev/boss"
+        self._session_root = self._resolve_session_root()
+        self.worktrees_dir = self._session_root / "worktrees"
+        self.boss_path = self.worktrees_dir / "boss"
+        self._worker_branch_template, self._boss_branch = self._resolve_branch_templates()
         self._initialized = False
         self._worker_paths: Dict[str, Path] = {}
 
@@ -323,6 +337,26 @@ class WorktreeManager:
         if self._repo.is_dirty(untracked_files=False):
             raise RuntimeError("Main repository has uncommitted changes; cannot merge results.")
         self._repo.git.merge(branch_name, "--ff-only")
+
+    def dispose(self) -> None:
+        if not self.session_namespace:
+            return
+        if self._session_root.exists():
+            shutil.rmtree(self._session_root, ignore_errors=True)
+        self._initialized = False
+        self._worker_paths = {}
+
+    def _resolve_session_root(self) -> Path:
+        base = self.root / ".parallel-dev"
+        if self.session_namespace:
+            return base / "sessions" / self.session_namespace
+        return base
+
+    def _resolve_branch_templates(self) -> tuple[str, str]:
+        if self.session_namespace:
+            prefix = f"parallel-dev/{self.session_namespace}"
+            return f"{prefix}/{{name}}", f"{prefix}/boss"
+        return "parallel-dev/{name}", "parallel-dev/boss"
 
 
 class CodexMonitor:

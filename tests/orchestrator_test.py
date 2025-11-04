@@ -17,16 +17,16 @@ def dependencies():
     tmux = Mock(name="tmux_manager")
     worktree = Mock(name="worktree_manager")
     worktree.root = Path("/repo")
-    worktree.boss_path = Path("/repo/.parallel-dev/boss")
-    worktree.boss_branch = "parallel-dev/boss"
-    worktree.worker_branch.side_effect = lambda name: f"parallel-dev/{name}"
+    worktree.boss_path = Path("/repo/.parallel-dev/sessions/session-a/worktrees/boss")
+    worktree.boss_branch = "parallel-dev/session-a/boss"
+    worktree.worker_branch.side_effect = lambda name: f"parallel-dev/session-a/{name}"
     monitor = Mock(name="monitor")
     logger = Mock(name="log_manager")
 
     worktree.prepare.return_value = {
-        "worker-1": Path("/repo/.parallel-dev/worktrees/worker-1"),
-        "worker-2": Path("/repo/.parallel-dev/worktrees/worker-2"),
-        "worker-3": Path("/repo/.parallel-dev/worktrees/worker-3"),
+        "worker-1": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        "worker-2": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-2"),
+        "worker-3": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-3"),
     }
 
     worker_panes = ["pane-worker-1", "pane-worker-2", "pane-worker-3"]
@@ -113,7 +113,7 @@ def test_orchestrator_runs_happy_path(dependencies):
     )
     tmux.launch_main_session.assert_called_once_with(pane_id="pane-main")
     tmux.launch_boss_session.assert_not_called()
-    tmux.set_boss_path.assert_called_once_with(Path("/repo/.parallel-dev/boss"))
+    tmux.set_boss_path.assert_called_once_with(Path("/repo/.parallel-dev/sessions/session-a/worktrees/boss"))
     monitor.register_new_rollout.assert_any_call(pane_id="pane-main", baseline={})
     monitor.register_new_rollout.assert_any_call(
         pane_id="pane-boss", baseline={Path("/rollout-main"): 1.0}
@@ -127,9 +127,9 @@ def test_orchestrator_runs_happy_path(dependencies):
         instruction=main_call.kwargs["instruction"],
     )
     expected_worker_paths = {
-        "pane-worker-1": Path("/repo/.parallel-dev/worktrees/worker-1"),
-        "pane-worker-2": Path("/repo/.parallel-dev/worktrees/worker-2"),
-        "pane-worker-3": Path("/repo/.parallel-dev/worktrees/worker-3"),
+        "pane-worker-1": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        "pane-worker-2": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-2"),
+        "pane-worker-3": Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-3"),
     }
     tmux.fork_workers.assert_called_once_with(
         workers=["pane-worker-1", "pane-worker-2", "pane-worker-3"],
@@ -141,7 +141,7 @@ def test_orchestrator_runs_happy_path(dependencies):
     tmux.fork_boss.assert_called_once_with(
         pane_id="pane-boss",
         base_session_id="session-main",
-        boss_path=Path("/repo/.parallel-dev/boss"),
+        boss_path=Path("/repo/.parallel-dev/sessions/session-a/worktrees/boss"),
     )
     boss_register_call = monitor.register_new_rollout.call_args_list[-1]
     assert boss_register_call.kwargs == {
@@ -158,7 +158,7 @@ def test_orchestrator_runs_happy_path(dependencies):
         "session_ids": list(dependencies["fork_map"].values())
     }
     assert boss_call.kwargs == {"session_ids": ["session-boss"]}
-    worktree.merge_into_main.assert_called_once_with("parallel-dev/boss")
+    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
     tmux.promote_to_main.assert_called_once_with(
         session_id="session-boss",
         pane_id="pane-main",

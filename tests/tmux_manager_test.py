@@ -84,6 +84,8 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
         worker_count=2,
         monitor=monitor,
         root_path=Path("/repo"),
+        session_namespace="session-a",
+        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     layout = manager.ensure_layout(session_name="parallel-dev", worker_count=2)
@@ -100,8 +102,8 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     manager.send_instruction_to_workers(fork_map=initial_map, instruction="echo worker")
 
     worker_paths = {
-        layout["workers"][0]: Path("/repo/.parallel-dev/worktrees/worker-1"),
-        layout["workers"][1]: Path("/repo/.parallel-dev/worktrees/worker-2"),
+        layout["workers"][0]: Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        layout["workers"][1]: Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-2"),
     }
 
     fork_list = manager.fork_workers(
@@ -120,20 +122,20 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     manager.promote_to_main(session_id="session-worker-1", pane_id=layout["main"])
 
     main_pane = monkeypatch_server.sessions[0].windows[0].panes[0]
-    assert any("cd /repo && codex" in entry[0] for entry in main_pane.sent)
+    assert any("cd /repo && env HOME=/repo/.parallel-dev/sessions/session-a/codex-home codex" in entry[0] for entry in main_pane.sent)
     assert any("echo main" in entry[0] for entry in main_pane.sent)
     assert main_pane.sent.count(("C-c", False)) >= 2
     worker_pane = monkeypatch_server.sessions[0].windows[0].panes[2]
-    assert any(entry[0].startswith("cd /repo/.parallel-dev/worktrees/worker-1 && codex resume") for entry in worker_pane.sent)
+    assert any(entry[0].startswith("cd /repo/.parallel-dev/sessions/session-a/worktrees/worker-1 && env HOME=/repo/.parallel-dev/sessions/session-a/codex-home codex resume") for entry in worker_pane.sent)
     assert worker_pane.sent.count(("C-c", False)) >= 2
     assert worker_pane.sent.count(("C-[", False)) >= 2
     assert worker_pane.sent.count(("", True)) >= 1
-    assert main_pane.sent[-1] == ("codex resume session-worker-1", True)
+    assert main_pane.sent[-1] == ("env HOME=/repo/.parallel-dev/sessions/session-a/codex-home codex resume session-worker-1", True)
 
     boss_pane = monkeypatch_server.sessions[0].windows[0].panes[1]
     assert ("C-c", False) in boss_pane.sent
     manager.resume_session(pane_id=layout["main"], workdir=Path("/repo"), session_id="session-main")
-    assert any("codex resume session-main" in entry[0] for entry in main_pane.sent)
+    assert any("env HOME=/repo/.parallel-dev/sessions/session-a/codex-home codex resume session-main" in entry[0] for entry in main_pane.sent)
 
 
 def test_tmux_layout_manager_recreates_existing_session(monkeypatch_server):
@@ -143,6 +145,8 @@ def test_tmux_layout_manager_recreates_existing_session(monkeypatch_server):
         worker_count=1,
         monitor=monitor,
         root_path=Path("/repo"),
+        session_namespace="session-a",
+        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     # Simulate pre-existing session
@@ -164,6 +168,8 @@ def test_fork_boss_interrupts_before_resume(monkeypatch_server):
         root_path=Path("/repo"),
         startup_delay=0.0,
         backtrack_delay=0.0,
+        session_namespace="session-a",
+        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     layout = manager.ensure_layout(session_name="parallel-dev", worker_count=1)
@@ -172,11 +178,11 @@ def test_fork_boss_interrupts_before_resume(monkeypatch_server):
     manager.fork_boss(
         pane_id=layout["boss"],
         base_session_id="session-main",
-        boss_path=Path("/repo/.parallel-dev/boss"),
+        boss_path=Path("/repo/.parallel-dev/sessions/session-a/worktrees/boss"),
     )
 
     assert boss_pane.sent[:2] == [("C-c", False), ("C-c", False)]
     assert any(
-        entry[0].startswith("cd /repo/.parallel-dev/boss && codex resume session-main")
+        entry[0].startswith("cd /repo/.parallel-dev/sessions/session-a/worktrees/boss && env HOME=/repo/.parallel-dev/sessions/session-a/codex-home codex resume session-main")
         for entry in boss_pane.sent
     )

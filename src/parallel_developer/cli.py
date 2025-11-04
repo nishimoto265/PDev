@@ -214,6 +214,9 @@ class CLIController:
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._settings: Dict[str, object] = self._load_settings()
         self._attach_mode: str = str(self._settings.get("attach_mode", "auto"))
+        self._session_namespace: str = self._config.session_id
+        self._session_root: Path = self._worktree_root / ".parallel-dev" / "sessions" / self._session_namespace
+        self._codex_home: Path = self._session_root / "codex-home"
         self._command_specs: Dict[str, Dict[str, object]] = {
             "/attach": {
                 "description": "tmux セッションへの接続モードを切り替える、または即座に接続する",
@@ -678,11 +681,14 @@ class CLIController:
 
         logs_dir = self._create_cycle_logs_dir()
 
+        codex_home = self._ensure_codex_home()
         orchestrator = self._builder(
             worker_count=self._config.worker_count,
             log_dir=logs_dir,
             session_name=self._config.tmux_session,
             reuse_existing_session=self._config.reuse_existing_session,
+            session_namespace=self._session_namespace,
+            codex_home=codex_home,
         )
         self._active_orchestrator = orchestrator
         self._last_tmux_manager = getattr(orchestrator, "_tmux", None)
@@ -1022,6 +1028,13 @@ class CLIController:
         logs_dir = self._config.logs_root / timestamp
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
+
+    def _ensure_codex_home(self) -> Path:
+        self._session_root.mkdir(parents=True, exist_ok=True)
+        self._codex_home.mkdir(parents=True, exist_ok=True)
+        sessions_dir = self._codex_home / ".codex" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        return self._codex_home
 
     async def _wait_for_session(self, session_name: str, attempts: int = 20, delay: float = 0.25) -> bool:
         for _ in range(attempts):
@@ -1662,6 +1675,8 @@ def build_orchestrator(
     log_dir: Optional[Path],
     session_name: Optional[str] = None,
     reuse_existing_session: bool = False,
+    session_namespace: Optional[str] = None,
+    codex_home: Optional[Path] = None,
 ) -> Orchestrator:
     session_name = session_name or "parallel-dev"
     timestamp = datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
@@ -1671,8 +1686,22 @@ def build_orchestrator(
     session_map_root.mkdir(parents=True, exist_ok=True)
     session_map_path = session_map_root / "sessions_map.yaml"
 
-    monitor = CodexMonitor(logs_dir=base_logs_dir, session_map_path=session_map_path)
     worktree_root = Path.cwd()
+    session_root = worktree_root / ".parallel-dev"
+    if session_namespace:
+        session_root = session_root / "sessions" / session_namespace
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    codex_home = Path(codex_home) if codex_home else session_root / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+    codex_sessions_root = codex_home / ".codex" / "sessions"
+    codex_sessions_root.mkdir(parents=True, exist_ok=True)
+
+    monitor = CodexMonitor(
+        logs_dir=base_logs_dir,
+        session_map_path=session_map_path,
+        codex_sessions_root=codex_sessions_root,
+    )
     tmux_manager = TmuxLayoutManager(
         session_name=session_name,
         worker_count=worker_count,
@@ -1681,8 +1710,14 @@ def build_orchestrator(
         startup_delay=0.5,
         backtrack_delay=0.3,
         reuse_existing_session=reuse_existing_session,
+        session_namespace=session_namespace,
+        codex_home=codex_home,
     )
-    worktree_manager = WorktreeManager(root=worktree_root, worker_count=worker_count)
+    worktree_manager = WorktreeManager(
+        root=worktree_root,
+        worker_count=worker_count,
+        session_namespace=session_namespace,
+    )
     log_manager = LogManager(logs_dir=base_logs_dir)
 
     return Orchestrator(
