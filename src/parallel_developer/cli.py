@@ -1381,7 +1381,6 @@ class ParallelDeveloperApp(App):
         if key not in {"ctrl+c", "control+c"} and name not in {"ctrl+c", "control+c"}:
             return False
         event.stop()
-        event.prevent_default()
         now = time.monotonic()
         if self._ctrl_c_armed and now - self._ctrl_c_armed_at <= self._ctrl_c_timeout:
             self._ctrl_c_armed = False
