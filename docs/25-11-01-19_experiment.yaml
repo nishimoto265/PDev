@@ -234,6 +234,7 @@
   - Worktree・tmux・builder・orchestratorテストを更新し、セッション分離とenv注入を検証するケースを追加
   - `/codexhome` コマンドで session/shared を切り替えられるようにし、設定ファイルへ保存する処理を追加
   - `PARALLEL_DEV_CODEX_HOME(_MODE)` 環境変数でCodex HOMEを外部指定できるようにし、初回ブートストラップで`~/.codex`構成をコピーする
+  - `/boss` コマンドで Boss モードを `score`/`select`/`rewrite` に切り替えられるようにし、rewriteでは採点後にBossが統合実装を行うよう指示テキストを更新
   reproduce:
   - uv run pytest
   result: tests 63 passed

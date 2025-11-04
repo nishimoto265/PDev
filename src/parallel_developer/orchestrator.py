@@ -5,8 +5,15 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
+
+
+class BossMode(str, Enum):
+    SCORE = "score"
+    SKIP = "select"
+    REWRITE = "rewrite"
 
 
 @dataclass(slots=True)
@@ -74,6 +81,7 @@ class Orchestrator:
         session_name: str,
         main_session_hook: Optional[Callable[[str], None]] = None,
         worker_decider: Optional[Callable[[Mapping[str, str], Mapping[str, Any], "CycleLayout"], bool]] = None,
+        boss_mode: BossMode = BossMode.SCORE,
     ) -> None:
         self._tmux = tmux_manager
         self._worktree = worktree_manager
@@ -81,6 +89,7 @@ class Orchestrator:
         self._log = log_manager
         self._worker_count = worker_count
         self._session_name = session_name
+        self._boss_mode = boss_mode if isinstance(boss_mode, BossMode) else BossMode(str(boss_mode))
         self._active_worker_sessions: List[str] = []
         self._main_session_hook: Optional[Callable[[str], None]] = main_session_hook
         self._worker_decider = worker_decider
@@ -163,12 +172,16 @@ class Orchestrator:
                 continue_requested=True,
             )
 
-        boss_session_id, boss_metrics = self._run_boss_phase(
-            layout=layout,
-            main_session_id=main_session_id,
-            user_instruction=instruction.rstrip(),
-            completion_info=completion_info,
-        )
+        if self._boss_mode == BossMode.SKIP:
+            boss_session_id = None
+            boss_metrics: Dict[str, Dict[str, Any]] = {}
+        else:
+            boss_session_id, boss_metrics = self._run_boss_phase(
+                layout=layout,
+                main_session_id=main_session_id,
+                user_instruction=instruction.rstrip(),
+                completion_info=completion_info,
+            )
 
         candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
         artifact.boss_session_id = boss_session_id
@@ -611,8 +624,7 @@ class Orchestrator:
         worker_lines = "\n".join(
             f"- Evaluate the proposal from {name}" for name in worker_names
         )
-        return (
-            "Boss evaluation phase:\n"
+        base = (
             "You are the reviewer. The original user instruction was:\n"
             f"""{user_instruction}\n\n"""
             "Tasks:\n"
@@ -621,7 +633,20 @@ class Orchestrator:
             "Respond with JSON using the schema:\n"
             "{\n  \"scores\": {\n    \"worker-1\": {\"score\": <number>, \"comment\": <string>},\n"
             "    ... other candidates ...\n  }\n}\n"
-            "Only output the JSON object. After that, send /done."
+            "Output only the JSON object for the evaluation.\n"
+        )
+        if self._boss_mode == BossMode.REWRITE:
+            return (
+                "Boss evaluation and rewrite phase:\n"
+                f"{base}"
+                "After outputting the JSON scoreboard, continue working in this boss workspace to deliver the final merged implementation.\n"
+                "Refactor or combine the strongest worker contributions. If one worker solution is already perfect, copy that worker's result into this boss workspace instead of rewriting.\n"
+                "Document key integration decisions in the log, ensure tests are updated if necessary, and then respond with /done when the boss implementation is complete."
+            )
+        return (
+            "Boss evaluation phase:\n"
+            f"{base}"
+            "After the JSON response, send /done."
         )
 
     def _maybe_pause(self, env_var: str, message: str) -> None:

@@ -32,7 +32,7 @@ from textual.widgets import Footer, Header, OptionList, RichLog, Static, TextAre
 from textual.widgets.option_list import Option
 from textual.dom import NoScreen
 
-from .orchestrator import CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision
+from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
 
@@ -154,6 +154,7 @@ class SessionConfig:
     worker_count: int
     mode: SessionMode
     logs_root: Path
+    boss_mode: BossMode = BossMode.SCORE
     reuse_existing_session: bool = False
 
 @dataclass
@@ -216,6 +217,11 @@ class CLIController:
         self._settings: Dict[str, object] = self._load_settings()
         self._attach_mode: str = str(self._settings.get("attach_mode", "auto"))
         self._codex_home_mode: str = str(self._settings.get("codex_home_mode", "session"))
+        saved_boss_mode = str(self._settings.get("boss_mode", BossMode.SCORE.value))
+        try:
+            self._config.boss_mode = BossMode(saved_boss_mode)
+        except ValueError:
+            self._config.boss_mode = BossMode.SCORE
         self._session_namespace: str = self._config.session_id
         self._session_root: Path = self._worktree_root / ".parallel-dev" / "sessions" / self._session_namespace
         self._codex_home: Path = self._session_root / "codex-home"
@@ -226,6 +232,14 @@ class CLIController:
                     CommandOption("auto", "auto"),
                     CommandOption("manual", "manual"),
                     CommandOption("now", "now"),
+                ],
+            },
+            "/boss": {
+                "description": "Boss モードを切り替える",
+                "options": [
+                    CommandOption("score", "score"),
+                    CommandOption("select", "select"),
+                    CommandOption("rewrite", "rewrite"),
                 ],
             },
             "/codexhome": {
@@ -369,6 +383,38 @@ class CLIController:
                 self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
             else:
                 self._emit("log", {"text": "/continue は現在利用できません。"})
+            return
+
+        if name == "/boss":
+            if option is None:
+                mode = self._config.boss_mode.value
+                self._emit(
+                    "log",
+                    {
+                        "text": (
+                            "現在の Boss モードは {mode} です。"
+                            " (score=採点のみ, select=採点スキップ, rewrite=再実装)"
+                        ).format(mode=mode)
+                    },
+                )
+                return
+            value = str(option).lower()
+            mapping = {
+                "score": BossMode.SCORE,
+                "select": BossMode.SKIP,
+                "skip": BossMode.SKIP,
+                "rewrite": BossMode.REWRITE,
+            }
+            new_mode = mapping.get(value)
+            if new_mode is None:
+                self._emit("log", {"text": "使い方: /boss score | /boss select | /boss rewrite"})
+                return
+            if new_mode == self._config.boss_mode:
+                self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
+                return
+            self._config.boss_mode = new_mode
+            self._save_settings()
+            self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
             return
 
         if name == "/codexhome":
@@ -725,6 +771,7 @@ class CLIController:
             reuse_existing_session=self._config.reuse_existing_session,
             session_namespace=self._session_namespace,
             codex_home=codex_home,
+            boss_mode=self._config.boss_mode,
         )
         self._active_orchestrator = orchestrator
         self._last_tmux_manager = getattr(orchestrator, "_tmux", None)
@@ -1057,6 +1104,7 @@ class CLIController:
             worker_count=3,
             mode=SessionMode.PARALLEL,
             logs_root=logs_root,
+            boss_mode=BossMode.SCORE,
         )
 
     def _create_cycle_logs_dir(self) -> Path:
@@ -1143,6 +1191,7 @@ class CLIController:
         data = dict(self._settings)
         data["attach_mode"] = self._attach_mode
         data["codex_home_mode"] = self._codex_home_mode
+        data["boss_mode"] = self._config.boss_mode.value
         try:
             self._settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             self._settings = data
@@ -1766,6 +1815,7 @@ def build_orchestrator(
     reuse_existing_session: bool = False,
     session_namespace: Optional[str] = None,
     codex_home: Optional[Path] = None,
+    boss_mode: BossMode = BossMode.SCORE,
 ) -> Orchestrator:
     session_name = session_name or "parallel-dev"
     timestamp = datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
@@ -1816,6 +1866,7 @@ def build_orchestrator(
         log_manager=log_manager,
         worker_count=worker_count,
         session_name=session_name,
+        boss_mode=boss_mode,
     )
 
 

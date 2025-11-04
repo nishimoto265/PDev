@@ -7,6 +7,7 @@ import pytest
 
 from parallel_developer.orchestrator import (
     CandidateInfo,
+    BossMode,
     Orchestrator,
     SelectionDecision,
 )
@@ -92,6 +93,7 @@ def test_orchestrator_runs_happy_path(dependencies):
         log_manager=dependencies["logger"],
         worker_count=3,
         session_name="parallel-dev",
+        boss_mode=BossMode.SCORE,
     )
 
     def selector(candidates, scoreboard=None):
@@ -192,6 +194,7 @@ def test_orchestrator_continue_skips_boss_phase(dependencies):
         worker_count=3,
         session_name="parallel-dev",
         worker_decider=worker_decider,
+        boss_mode=BossMode.SCORE,
     )
 
     orchestrator._run_boss_phase = Mock(name="run_boss_phase")
@@ -214,6 +217,7 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
         log_manager=dependencies["logger"],
         worker_count=3,
         session_name="parallel-dev",
+        boss_mode=BossMode.SCORE,
     )
 
     def selector(candidates, scoreboard=None):
@@ -255,6 +259,7 @@ def test_ensure_done_directive_always_appends(dependencies):
         log_manager=Mock(),
         worker_count=1,
         session_name="parallel-dev",
+        boss_mode=BossMode.SCORE,
     )
 
     instruction = "作業して完了したら /done"
@@ -263,3 +268,56 @@ def test_ensure_done_directive_always_appends(dependencies):
     assert ensured.endswith("`/done`.")
     ensured_again = orchestrator._ensure_done_directive(ensured)
     assert ensured_again == ensured
+
+
+def test_orchestrator_skip_boss_mode(dependencies):
+    tmux = dependencies["tmux"]
+    monitor = dependencies["monitor"]
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=dependencies["worktree"],
+        monitor=monitor,
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        boss_mode=BossMode.SKIP,
+    )
+
+    def selector(candidates, scoreboard=None):
+        return SelectionDecision(
+            selected_key=candidates[0].key,
+            scores={candidate.key: (1.0 if candidate == candidates[0] else 0.0) for candidate in candidates},
+        )
+
+    result = orchestrator.run_cycle(dependencies["instruction"], selector=selector)
+
+    tmux.fork_boss.assert_not_called()
+    boss_calls = [call for call in monitor.register_new_rollout.call_args_list if call.kwargs.get("pane_id") == "pane-boss"]
+    assert not boss_calls
+    assert "boss" not in result.sessions_summary
+
+
+def test_boss_instruction_rewrite_mode():
+    tmux = Mock()
+    worktree = Mock()
+    worktree.root = Path("/repo")
+    worktree.boss_path = Path("/repo/.parallel-dev/sessions/session-a/worktrees/boss")
+    worktree.boss_branch = "parallel-dev/session-a/boss"
+    worktree.worker_branch.side_effect = lambda name: f"parallel-dev/session-a/{name}"
+    monitor = Mock()
+    logger = Mock()
+
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=logger,
+        worker_count=2,
+        session_name="parallel-dev",
+        boss_mode=BossMode.REWRITE,
+    )
+
+    text = orchestrator._build_boss_instruction(["worker-1", "worker-2"], "Implement feature X")
+    assert "For each candidate" in text
+    assert "After outputting the JSON" in text
+    assert "refactor" in text.lower() or "再実装" in text

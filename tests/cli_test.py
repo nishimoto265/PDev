@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from parallel_developer.cli import CLIController, SessionMode, TmuxAttachManager
-from parallel_developer.orchestrator import CycleArtifact, OrchestrationResult
+from parallel_developer.orchestrator import BossMode, CycleArtifact, OrchestrationResult
 from parallel_developer.session_manifest import ManifestStore, PaneRecord, SessionManifest
 from types import SimpleNamespace
 
@@ -649,6 +649,75 @@ def test_codex_home_command_blocked_by_env(tmp_path, monkeypatch):
     # 設定は変わらず session のまま
     assert controller._codex_home_mode == "session"
     assert any("環境変数" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_boss_command_updates_mode(monkeypatch, manifest_store, tmp_path):
+    events = []
+
+    def handler(event_type, payload):
+        events.append((event_type, payload))
+
+    captured_kwargs = {}
+
+    def builder(**kwargs):
+        captured_kwargs.update(kwargs)
+        orchestrator = Mock()
+        artifact = CycleArtifact(
+            main_session_id="session-main",
+            worker_sessions={},
+            boss_session_id=None,
+            worker_paths={},
+            boss_path=None,
+            instruction="",
+            tmux_session="parallel-dev-test",
+        )
+        artifact.selected_session_id = "session-main"
+        orchestrator.run_cycle.return_value = OrchestrationResult(
+            selected_session="session-main",
+            sessions_summary={"main": {"selected": True}},
+            artifact=artifact,
+        )
+        return orchestrator
+
+    controller = CLIController(
+        event_handler=handler,
+        orchestrator_builder=builder,
+        manifest_store=manifest_store,
+        worktree_root=tmp_path,
+    )
+    controller._config.logs_root = tmp_path / "logs"
+
+    assert controller._config.boss_mode == BossMode.SCORE
+    _run_async(controller.handle_input("/boss rewrite"))
+    assert controller._config.boss_mode == BossMode.REWRITE
+    _run_async(controller.handle_input("Implement feature"))
+    assert captured_kwargs["boss_mode"] == BossMode.REWRITE
+    settings_path = tmp_path / ".parallel-dev" / "settings.json"
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["boss_mode"] == "rewrite"
+
+
+def test_boss_command_reports_current_mode(tmp_path, caplog):
+    events = []
+
+    def handler(event_type, payload):
+        events.append((event_type, payload))
+
+    controller = CLIController(event_handler=handler, worktree_root=tmp_path)
+    _run_async(controller.handle_input("/boss"))
+    log_messages = [payload.get("text", "") for event, payload in events if event == "log"]
+    assert any("Boss" in msg and "score" in msg for msg in log_messages if isinstance(msg, str))
+
+
+def test_boss_command_rejects_invalid_option(tmp_path):
+    events = []
+
+    def handler(event_type, payload):
+        events.append((event_type, payload))
+
+    controller = CLIController(event_handler=handler, worktree_root=tmp_path)
+    _run_async(controller.handle_input("/boss invalid"))
+    log_messages = [payload.get("text", "") for event, payload in events if event == "log"]
+    assert any("使い方" in msg for msg in log_messages)
 
 
 def test_tmux_attach_manager_is_attached(monkeypatch):

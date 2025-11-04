@@ -46,9 +46,13 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
         fake_monitor,
     )
     monkeypatch.setattr("parallel_developer.cli.LogManager", lambda **_: log_manager)
+    def fake_orchestrator(**kwargs):
+        assert kwargs["boss_mode"].value == "score"
+        return orchestrator_instance
+
     monkeypatch.setattr(
         "parallel_developer.cli.Orchestrator",
-        lambda **kwargs: orchestrator_instance,
+        fake_orchestrator,
     )
 
     result = cli.build_orchestrator(worker_count=3, log_dir=None, session_namespace="namespace", codex_home=Path("codex-home"))
