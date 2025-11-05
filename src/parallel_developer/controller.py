@@ -670,10 +670,13 @@ class CLIController:
         main_pane = pane_ids[0] if pane_ids else None
 
         if not self._cycle_history:
-            if self._pre_cycle_selected_session_set:
+            session_id: Optional[str]
+            if self._pre_cycle_selected_session_set and self._pre_cycle_selected_session:
                 session_id = self._pre_cycle_selected_session
-            else:
+            elif self._active_main_session_id:
                 session_id = self._active_main_session_id
+            else:
+                session_id = self._last_started_main_session_id
             self._last_selected_session = session_id
             self._active_main_session_id = session_id
             self._last_scoreboard = {}

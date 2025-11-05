@@ -197,7 +197,7 @@ def test_first_cycle_cancel_keeps_current_session(base_controller):
 
     _run(controller._workflow.run_instruction("first cancelled"))
     assert resume_ids[0] is None
-    assert controller._last_selected_session is None
+    assert controller._last_selected_session == "session-new"
 
     _run(controller._workflow.run_instruction("second run"))
-    assert resume_ids[1] is None
+    assert resume_ids[1] == "session-new"
