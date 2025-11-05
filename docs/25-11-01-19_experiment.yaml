@@ -308,3 +308,14 @@
   - uv run pytest
   result: tests 89 passed
   notes: 上キー操作で落ちなくなったことを手動確認。Textual内部仕様変更に備えてdoc.get_line取得時は例外を無視するガードを追加
+- date: '2025-11-05'
+  time_utc: '05:55:00'
+  summary: ワーカーへの指示再送と自動Enter送信を廃止
+  details:
+  - Orchestratorでfork後に`tmux.send_instruction_to_workers`を呼び出す処理を削除し、既存セッション履歴に残った指示のみを利用するよう戻した
+  - TmuxLayoutManager.fork_workersから空行Enter送出を取り除き、resume直後に指示が自動送信されて消える回帰を解消
+  - 付随するユニットテストを更新し、自動送信用のMock呼び出しが発生しないことと空のEnterが送出されないことを検証
+  reproduce:
+  - uv run pytest
+  result: tests 89 passed
+  notes: 04:45対応のEnterブロードキャストは撤回。フォーク後は従来通りワーカーが手動でEnter入力して指示を送信する運用に戻した

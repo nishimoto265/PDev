@@ -132,12 +132,6 @@ class Orchestrator:
             baseline=baseline,
         )
         self._active_worker_sessions = [session_id for session_id in fork_map.values() if session_id]
-        if fork_map:
-            self._tmux.send_instruction_to_workers(
-                fork_map=fork_map,
-                instruction=formatted_instruction,
-            )
-
         completion_info = self._await_worker_completion(fork_map)
 
         worker_sessions = {
@@ -365,7 +359,6 @@ class Orchestrator:
             worker_panes=worker_pane_list,
             baseline=baseline,
         )
-        self._tmux.confirm_workers(fork_map)
         return fork_map
 
     def _await_worker_completion(self, fork_map: Mapping[str, str]) -> Dict[str, Any]:

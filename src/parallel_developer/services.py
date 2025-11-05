@@ -169,7 +169,6 @@ class TmuxLayoutManager:
         if worker_list:
             self._broadcast_keys(worker_list, "C-[", enter=False)
             self._broadcast_keys(worker_list, "C-[", enter=False)
-            self._broadcast_keys(worker_list, "", enter=True)
         self._maybe_wait()
         return worker_list
 
@@ -179,12 +178,6 @@ class TmuxLayoutManager:
     def send_instruction_to_workers(self, fork_map: Mapping[str, str], instruction: str) -> None:
         for pane_id in fork_map:
             self._send_text(pane_id, instruction)
-
-    def confirm_workers(self, fork_map: Mapping[str, str]) -> None:
-        pane_ids = list(fork_map)
-        if not pane_ids:
-            return
-        self._broadcast_keys(pane_ids, "", enter=True)
 
     def prepare_for_instruction(self, *, pane_id: str) -> None:
         pane = self._get_pane(pane_id)
