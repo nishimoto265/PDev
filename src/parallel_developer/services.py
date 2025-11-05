@@ -448,7 +448,6 @@ class CodexMonitor:
             "rollout_path": str(rollout_path),
             "offset": int(offset),
         }
-        self._mirror_rollout_to_bridge(session_id, rollout_path)
         self._write_map(data)
 
     def bind_existing_session(self, *, pane_id: str, session_id: str) -> None:
@@ -668,18 +667,6 @@ class CodexMonitor:
         for session_id in session_ids:
             if session_id:
                 self._forced_done.add(session_id)
-
-    def _mirror_rollout_to_bridge(self, session_id: str, rollout_path: Path) -> None:
-        bridge_dir = self.codex_sessions_root / "bridge"
-        try:
-            bridge_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            return
-        bridge_path = bridge_dir / f"{session_id}.jsonl"
-        try:
-            shutil.copyfile(rollout_path, bridge_path)
-        except OSError:
-            pass
 
     def wait_for_rollout_activity(
         self,
