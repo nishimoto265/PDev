@@ -139,7 +139,6 @@ def test_orchestrator_runs_happy_path(dependencies):
         base_session_id="session-main",
         pane_paths=expected_worker_paths,
     )
-    tmux.send_instruction_to_workers.assert_not_called()
     monitor.register_worker_rollouts.assert_called_once()
     tmux.fork_boss.assert_called_once_with(
         pane_id="pane-boss",

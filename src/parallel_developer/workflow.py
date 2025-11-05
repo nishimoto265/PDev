@@ -32,17 +32,18 @@ class WorkflowManager:
         c._running = True
         c._emit_status("メインセッションを準備中...")
         c._active_main_session_id = None
+        c._pre_cycle_selected_session = c._last_selected_session
+        c._pre_cycle_selected_session_set = True
 
         logs_dir = c._create_cycle_logs_dir()
 
-        codex_home = c._ensure_codex_home()
         orchestrator = c._builder(
             worker_count=c._config.worker_count,
             log_dir=logs_dir,
             session_name=c._config.tmux_session,
             reuse_existing_session=c._config.reuse_existing_session,
             session_namespace=c._session_namespace,
-            codex_home=codex_home,
+            instruction_settle_delay=c._instruction_settle_delay,
             boss_mode=c._config.boss_mode,
         )
         c._active_orchestrator = orchestrator
@@ -119,6 +120,8 @@ class WorkflowManager:
                     await auto_attach_task
                 except Exception:  # noqa: BLE001
                     pass
+            c._pre_cycle_selected_session = None
+            c._pre_cycle_selected_session_set = False
 
         if continued:
             return

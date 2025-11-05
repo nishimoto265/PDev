@@ -63,7 +63,6 @@ metadata:
       - "`/mode main|parallel` で並列モードを切り替え、メインのみ実行かワーカー起動かを制御する。"
       - "`/resume` で過去CLIセッション一覧を表示し、選択した履歴から再開できるようにする。"
       - "`/log copy` で表示中のログをクリップボードに転送し、`/log save <path>` でテキストファイルとして保存できるようにする。"
-      - "`/codexhome session|shared` で Codex HOME の隔離モードと共有モードを切り替える（環境変数が指定されている場合はそちらが優先される）。"
       - "CLI画面にスコアボード・採点結果をストリーミング表示し、必要に応じて`/scoreboard`で再表示できるようにする。"
       - "会話ログ（ユーザー指示・エージェント応答）をCLI上にロードし直し、`/resume` 実行直後から続きが見える状態に復元する。"
       - "TextualベースのUIを採用し、イベントログ・状態表示・入力欄を統合する。採点完了後は候補がリスト表示され、上下キーで選択、Enterで決定できる操作を提供する。"
@@ -89,8 +88,6 @@ tmuxレイアウト:
 セッションID取得:
   - "フォーク後、CLIは`.parallel-dev/sessions/<session_id>/codex-home/.codex/sessions`（または共有モード時は`~/.codex/sessions`）配下のrollout-*.jsonlを監視し、先頭行のSessionMetaから`id`を取得する。"
 環境変数:
-  - "`PARALLEL_DEV_CODEX_HOME_MODE` で Codex HOME のモードを `session`（デフォルト）または `shared` に強制設定できる。"
-  - "`PARALLEL_DEV_CODEX_HOME` で Codex HOME のベースパスを指定できる。`{session}` を含めるとCLIが自動的にセッションIDへ置換する。"
   - "ファイル名に含まれるUUIDとSessionMeta内のIDを照合し、一致を確認してセッションIDとして採用する。"
   - "取得したIDとrolloutパス・offsetは`logs/<タイムスタンプ>/sessions_map.yaml`に記録し、paneやworktreeとの対応関係を保持する。"
   - "Bossが採用したセッションをメインに昇格させる際は、このMapを用いて対象セッションのJSONL・worktree・ペインIDを逆引きし、メインペインで`codex resume <採用ID>`を発行する。"

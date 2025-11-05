@@ -11,7 +11,6 @@ from typing import Dict, Optional
 @dataclass
 class SettingsData:
     attach_mode: str = "auto"
-    codex_home_mode: str = "shared"
     boss_mode: str = "score"
 
 
@@ -33,15 +32,6 @@ class SettingsStore:
         self._save()
 
     @property
-    def codex_home_mode(self) -> str:
-        return self._data.codex_home_mode
-
-    @codex_home_mode.setter
-    def codex_home_mode(self, value: str) -> None:
-        self._data.codex_home_mode = value
-        self._save()
-
-    @property
     def boss_mode(self) -> str:
         return self._data.boss_mode
 
@@ -53,15 +43,12 @@ class SettingsStore:
     def snapshot(self) -> Dict[str, str]:
         return {
             "attach_mode": self._data.attach_mode,
-            "codex_home_mode": self._data.codex_home_mode,
             "boss_mode": self._data.boss_mode,
         }
 
-    def update(self, *, attach_mode: Optional[str] = None, codex_home_mode: Optional[str] = None, boss_mode: Optional[str] = None) -> None:
+    def update(self, *, attach_mode: Optional[str] = None, boss_mode: Optional[str] = None) -> None:
         if attach_mode is not None:
             self._data.attach_mode = attach_mode
-        if codex_home_mode is not None:
-            self._data.codex_home_mode = codex_home_mode
         if boss_mode is not None:
             self._data.boss_mode = boss_mode
         self._save()
@@ -75,7 +62,6 @@ class SettingsStore:
             return SettingsData()
         return SettingsData(
             attach_mode=str(payload.get("attach_mode", "auto")),
-            codex_home_mode=str(payload.get("codex_home_mode", "shared")),
             boss_mode=str(payload.get("boss_mode", "score")),
         )
 

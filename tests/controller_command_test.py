@@ -81,21 +81,6 @@ def test_parallel_command_valid_and_invalid(controller, event_recorder):
     assert any("1以上" in payload.get("text", "") for event, payload in events if event == "log")
 
 
-def test_codexhome_with_env(monkeypatch, controller, event_recorder):
-    events, _ = event_recorder
-    monkeypatch.setenv("PARALLEL_DEV_CODEX_HOME_MODE", "shared")
-    _run(controller.execute_command("/codexhome", "session"))
-    assert controller._codex_home_mode == controller._settings_store.codex_home_mode
-    assert any("環境変数" in payload.get("text", "") for event, payload in events if event == "log")
-
-    monkeypatch.delenv("PARALLEL_DEV_CODEX_HOME_MODE")
-    events.clear()
-    _run(controller.execute_command("/codexhome", "shared"))
-    assert controller._codex_home_mode == "shared"
-    assert controller._settings_store.codex_home_mode == "shared"
-    assert any("Codex HOME" in payload.get("text", "") for event, payload in events if event == "log")
-
-
 def test_mode_command(controller, event_recorder):
     events, _ = event_recorder
     _run(controller.execute_command("/mode", "main"))

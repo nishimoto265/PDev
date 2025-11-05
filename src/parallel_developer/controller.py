@@ -195,17 +195,26 @@ class CLIController:
         settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
         self._settings_store = SettingsStore(settings_path)
         self._attach_mode: str = self._settings_store.attach_mode
-        self._codex_home_mode: str = self._settings_store.codex_home_mode
         saved_boss_mode = self._settings_store.boss_mode
         try:
             self._config.boss_mode = BossMode(saved_boss_mode)
         except ValueError:
             self._config.boss_mode = BossMode.SCORE
         self._session_namespace: str = self._config.session_id
-        self._session_root: Path = self._worktree_root / ".parallel-dev" / "sessions" / self._session_namespace
-        self._codex_home: Path = self._session_root / "codex-home"
+        self._instruction_settle_delay = self._load_instruction_delay()
+        self._last_started_main_session_id: Optional[str] = None
+        self._pre_cycle_selected_session: Optional[str] = None
+        self._pre_cycle_selected_session_set: bool = False
         self._command_specs: Dict[str, CommandSpecEntry] = self._build_command_specs()
         self._workflow = WorkflowManager(self)
+
+    def _load_instruction_delay(self) -> float:
+        raw = os.getenv("PARALLEL_DEV_MAIN_INSTRUCTION_DELAY", "3.0")
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 3.0
+        return max(0.0, value)
 
     async def handle_input(self, user_input: str) -> None:
         text = user_input.strip()
@@ -293,10 +302,6 @@ class CLIController:
                     CommandOption("score", "score"),
                     CommandOption("rewrite", "rewrite"),
                 ],
-            ),
-            "/codexhome": CommandSpecEntry(
-                "Codex HOME のモードを切り替える (session/shared)",
-                self._cmd_codex_home,
             ),
             "/parallel": CommandSpecEntry(
                 "ワーカー数を設定する",
@@ -414,36 +419,6 @@ class CLIController:
         self._config.boss_mode = new_mode
         self._settings_store.boss_mode = new_mode.value
         self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
-
-    async def _cmd_codex_home(self, option: Optional[object]) -> None:
-        env_override = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE")
-        if env_override:
-            self._emit(
-                "log",
-                {
-                    "text": (
-                        "環境変数 PARALLEL_DEV_CODEX_HOME_MODE が設定されているため、"
-                        "/codexhome での変更は無効です。"
-                    )
-                },
-            )
-            return
-        if option is None:
-            self._emit(
-                "log",
-                {"text": f"現在の Codex HOME モードは {self._codex_home_mode} です。（session/shared）"},
-            )
-            return
-        mode = str(option).lower()
-        if mode not in {"session", "shared"}:
-            self._emit("log", {"text": "使い方: /codexhome session | /codexhome shared"})
-            return
-        if mode == self._codex_home_mode:
-            self._emit("log", {"text": f"Codex HOME モードは既に {mode} です。"})
-            return
-        self._codex_home_mode = mode
-        self._settings_store.codex_home_mode = mode
-        self._emit("log", {"text": f"Codex HOME モードを {mode} に設定しました。次のサイクルから適用されます。"})
 
     async def _cmd_attach(self, option: Optional[object]) -> None:
         mode = str(option).lower() if option is not None else None
@@ -705,7 +680,10 @@ class CLIController:
         main_pane = pane_ids[0] if pane_ids else None
 
         if not self._cycle_history:
-            session_id = self._active_main_session_id
+            if self._pre_cycle_selected_session_set:
+                session_id = self._pre_cycle_selected_session
+            else:
+                session_id = self._active_main_session_id
             self._last_selected_session = session_id
             self._active_main_session_id = session_id
             self._last_scoreboard = {}
@@ -721,16 +699,17 @@ class CLIController:
                 self._emit("log", {"text": f"前回のセッションを再開しました。次の指示はセッション {summary} から再開します。"})
                 self._emit_status("待機中")
                 self._emit_pause_state()
+            self._pre_cycle_selected_session = None
+            self._pre_cycle_selected_session_set = False
             return
 
-        self._cycle_history.pop()
-        snapshot = self._cycle_history[-1] if self._cycle_history else None
-        session_id = snapshot.get("selected_session") if snapshot else self._active_main_session_id
+        snapshot = self._cycle_history[-1]
+        session_id = snapshot.get("selected_session") or self._active_main_session_id or self._last_started_main_session_id
 
         self._last_selected_session = session_id
         self._active_main_session_id = session_id
-        self._last_scoreboard = snapshot.get("scoreboard", {}) if snapshot else {}
-        self._last_instruction = snapshot.get("instruction") if snapshot else None
+        self._last_scoreboard = snapshot.get("scoreboard", {})
+        self._last_instruction = snapshot.get("instruction")
         if self._last_scoreboard:
             self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
 
@@ -746,12 +725,15 @@ class CLIController:
             self._emit("log", {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
             self._emit_status("待機中")
             self._emit_pause_state()
+        self._pre_cycle_selected_session = None
+        self._pre_cycle_selected_session_set = False
 
     def _emit_pause_state(self) -> None:
         self._emit("pause_state", {"paused": self._paused})
 
     def _on_main_session_started(self, session_id: str) -> None:
         self._active_main_session_id = session_id
+        self._last_started_main_session_id = session_id
         if self._last_selected_session is None:
             self._last_selected_session = session_id
         self._config.reuse_existing_session = True
@@ -1000,65 +982,6 @@ class CLIController:
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
 
-    def _ensure_codex_home(self) -> Path:
-        codex_home, mode = self._resolve_codex_home()
-        codex_home.mkdir(parents=True, exist_ok=True)
-        if mode == "session":
-            self._session_root.mkdir(parents=True, exist_ok=True)
-            self._bootstrap_codex_home(codex_home)
-        sessions_dir = codex_home / ".codex" / "sessions"
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        self._codex_home = codex_home
-        return codex_home
-
-    def _resolve_codex_home(self) -> tuple[Path, str]:
-        env_mode = os.getenv("PARALLEL_DEV_CODEX_HOME_MODE", "").lower()
-        mode = env_mode if env_mode in {"session", "shared"} else self._codex_home_mode
-
-        env_path_raw = os.getenv("PARALLEL_DEV_CODEX_HOME")
-        if env_path_raw:
-            expanded = os.path.expandvars(os.path.expanduser(env_path_raw))
-            if "{session}" in expanded:
-                resolved = expanded.replace("{session}", self._session_namespace)
-                return Path(resolved), mode
-            path = Path(expanded)
-            if mode == "session" and env_mode == "":
-                return path / self._session_namespace, mode
-            return path, mode
-
-        if mode == "shared":
-            return Path.home(), mode
-        return self._session_root / "codex-home", mode
-
-    def _bootstrap_codex_home(self, codex_home: Path) -> None:
-        global_codex = Path.home() / ".codex"
-        if codex_home == Path.home():
-            return
-        target_codex = codex_home / ".codex"
-        sentinel = target_codex / ".bootstrap_complete"
-        if sentinel.exists():
-            return
-        if not global_codex.exists():
-            return
-        target_codex.mkdir(parents=True, exist_ok=True)
-        for item in global_codex.iterdir():
-            if item.name == "sessions":
-                continue
-            destination = target_codex / item.name
-            if destination.exists():
-                continue
-            if item.is_dir():
-                shutil.copytree(item, destination, dirs_exist_ok=True)
-            else:
-                try:
-                    shutil.copy2(item, destination)
-                except OSError:
-                    continue
-        try:
-            sentinel.write_text(datetime.utcnow().isoformat(timespec="seconds"), encoding="utf-8")
-        except OSError:
-            pass
-
     async def _wait_for_session(self, session_name: str, attempts: int = 20, delay: float = 0.25) -> bool:
         for _ in range(attempts):
             if self._attach_manager.session_exists(session_name):
@@ -1123,7 +1046,7 @@ class CLIController:
         session_name: Optional[str] = None,
         reuse_existing_session: bool = False,
         session_namespace: Optional[str] = None,
-        codex_home: Optional[Path] = None,
+        instruction_settle_delay: float = 0.0,
         boss_mode: BossMode = BossMode.SCORE,
     ) -> Orchestrator:
         raise RuntimeError("Orchestrator builder is not configured.")
@@ -1136,7 +1059,7 @@ def build_orchestrator(
     session_name: Optional[str] = None,
     reuse_existing_session: bool = False,
     session_namespace: Optional[str] = None,
-    codex_home: Optional[Path] = None,
+    instruction_settle_delay: float = 0.0,
     boss_mode: BossMode = BossMode.SCORE,
 ) -> Orchestrator:
     session_name = session_name or "parallel-dev"
@@ -1153,15 +1076,9 @@ def build_orchestrator(
         session_root = session_root / "sessions" / session_namespace
     session_root.mkdir(parents=True, exist_ok=True)
 
-    codex_home = Path(codex_home) if codex_home else session_root / "codex-home"
-    codex_home.mkdir(parents=True, exist_ok=True)
-    codex_sessions_root = codex_home / ".codex" / "sessions"
-    codex_sessions_root.mkdir(parents=True, exist_ok=True)
-
     monitor = CodexMonitor(
         logs_dir=base_logs_dir,
         session_map_path=session_map_path,
-        codex_sessions_root=codex_sessions_root,
         session_namespace=session_namespace,
     )
     tmux_manager = TmuxLayoutManager(
@@ -1173,7 +1090,6 @@ def build_orchestrator(
         backtrack_delay=0.3,
         reuse_existing_session=reuse_existing_session,
         session_namespace=session_namespace,
-        codex_home=codex_home,
     )
     worktree_manager = WorktreeManager(
         root=worktree_root,
@@ -1189,5 +1105,6 @@ def build_orchestrator(
         log_manager=log_manager,
         worker_count=worker_count,
         session_name=session_name,
+        instruction_settle_delay=instruction_settle_delay,
         boss_mode=boss_mode,
     )

@@ -28,9 +28,6 @@ def test_monitor_registers_and_logs_instruction(tmp_path: Path):
         rollout_path=rollout,
     )
 
-    bridge_file = (tmp_path / "codex" / "bridge" / "session-main.jsonl")
-    assert bridge_file.exists()
-
     session_id = monitor.capture_instruction(pane_id="pane-main", instruction="Build feature")
     assert session_id == "session-main"
 
@@ -58,8 +55,6 @@ def test_monitor_bind_existing_session(tmp_path: Path):
         session_id="session-existing",
         rollout_path=rollout,
     )
-    assert (tmp_path / "codex" / "bridge" / "session-existing.jsonl").exists()
-
     monitor.bind_existing_session(pane_id="pane-new", session_id="session-existing")
 
     mapping = yaml.safe_load(session_map.read_text(encoding="utf-8"))
@@ -85,9 +80,6 @@ def test_monitor_waits_for_done(tmp_path: Path):
 
     monitor.register_session(pane_id="pane-a", session_id="session-a", rollout_path=rollout_a)
     monitor.register_session(pane_id="pane-b", session_id="session-b", rollout_path=rollout_b)
-    assert (tmp_path / "codex" / "bridge" / "session-a.jsonl").exists()
-    assert (tmp_path / "codex" / "bridge" / "session-b.jsonl").exists()
-
     completion = monitor.await_completion(session_ids=["session-a", "session-b"], timeout_seconds=0.05)
     assert completion["session-a"]["done"] is False
     assert completion["session-b"]["done"] is False
@@ -131,7 +123,6 @@ def test_monitor_force_completion_during_wait(tmp_path: Path):
     rollout = tmp_path / "sessions" / "rollout-force.jsonl"
     rollout.write_text("", encoding="utf-8")
     monitor.register_session(pane_id="pane-force", session_id="session-force", rollout_path=rollout)
-    assert (tmp_path / "codex" / "bridge" / "session-force.jsonl").exists()
 
     def trigger_force():
         time.sleep(0.02)

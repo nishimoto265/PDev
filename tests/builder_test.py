@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +8,7 @@ from parallel_developer import controller
 @pytest.fixture(autouse=True)
 def isolate_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PARALLEL_DEV_MAIN_INSTRUCTION_DELAY", "0")
     yield
 
 
@@ -21,7 +21,6 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
 
     def fake_tmux(**kwargs):
         assert kwargs["session_namespace"] == "namespace"
-        assert kwargs["codex_home"] == Path("codex-home")
         return tmux
 
     monkeypatch.setattr(
@@ -38,7 +37,6 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
     )
 
     def fake_monitor(**kwargs):
-        assert kwargs["codex_sessions_root"] == Path("codex-home/.codex/sessions")
         return monitor
 
     monkeypatch.setattr(
@@ -48,6 +46,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
     monkeypatch.setattr("parallel_developer.controller.LogManager", lambda **_: log_manager)
     def fake_orchestrator(**kwargs):
         assert kwargs["boss_mode"].value == "score"
+        assert kwargs["instruction_settle_delay"] == 0.0
         return orchestrator_instance
 
     monkeypatch.setattr(
@@ -55,7 +54,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
         fake_orchestrator,
     )
 
-    result = controller.build_orchestrator(worker_count=3, log_dir=None, session_namespace="namespace", codex_home=Path("codex-home"))
+    result = controller.build_orchestrator(worker_count=3, log_dir=None, session_namespace="namespace")
 
     assert result is orchestrator_instance
     tmux.ensure_layout.assert_not_called()

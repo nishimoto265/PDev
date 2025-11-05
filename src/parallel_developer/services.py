@@ -30,7 +30,6 @@ class TmuxLayoutManager:
         backtrack_delay: float = 0.2,
         reuse_existing_session: bool = False,
         session_namespace: Optional[str] = None,
-        codex_home: Optional[Path] = None,
     ) -> None:
         self.session_name = session_name
         self.worker_count = worker_count
@@ -41,7 +40,6 @@ class TmuxLayoutManager:
         self.backtrack_delay = backtrack_delay
         self.reuse_existing_session = reuse_existing_session
         self.session_namespace = session_namespace
-        self.codex_home = Path(codex_home) if codex_home else None
         self._server = libtmux.Server()
 
     def set_boss_path(self, path: Path) -> None:
@@ -170,6 +168,11 @@ class TmuxLayoutManager:
         if worker_list:
             self._broadcast_keys(worker_list, "C-[", enter=False)
             self._broadcast_keys(worker_list, "C-[", enter=False)
+            for pane_id in worker_list:
+                pane = self._get_pane(pane_id)
+                pane.send_keys("", enter=True)
+            if self.backtrack_delay > 0:
+                time.sleep(self.backtrack_delay)
         self._maybe_wait()
         return worker_list
 
@@ -438,7 +441,6 @@ class CodexMonitor:
         }
         self._write_map(data)
         self._reserve_session(session_id, rollout_path)
-        self._mirror_rollout_to_bridge(session_id, rollout_path)
 
     def bind_existing_session(self, *, pane_id: str, session_id: str) -> None:
         data = self._load_map()
@@ -730,19 +732,6 @@ class CodexMonitor:
         except PermissionError:
             return True
         return True
-
-    def _mirror_rollout_to_bridge(self, session_id: str, rollout_path: Path) -> None:
-        bridge_dir = self.codex_sessions_root / "bridge"
-        try:
-            bridge_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            return
-
-        target = bridge_dir / f"{session_id}.jsonl"
-        try:
-            shutil.copyfile(rollout_path, target)
-        except OSError:
-            pass
 
     def wait_for_rollout_activity(
         self,

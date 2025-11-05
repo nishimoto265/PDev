@@ -90,7 +90,6 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
         monitor=monitor,
         root_path=Path("/repo"),
         session_namespace="session-a",
-        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     layout = manager.ensure_layout(session_name="parallel-dev", worker_count=2)
@@ -143,10 +142,10 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     assert any(entry[0].startswith("cd /repo/.parallel-dev/sessions/session-a/worktrees/worker-1 && codex resume") for entry in worker_pane.sent)
     assert worker_pane.sent.count(("C-c", False)) >= 2
     assert worker_pane.sent.count(("C-[", False)) >= 2
-    assert worker_pane.sent.count(("", True)) == 0
+    assert worker_pane.sent.count(("", True)) >= 1
     other_worker_pane = monkeypatch_server.sessions[0].windows[0].panes[3]
     assert other_worker_pane.sent.count(("C-[", False)) >= 2
-    assert other_worker_pane.sent.count(("", True)) == 0
+    assert other_worker_pane.sent.count(("", True)) >= 1
     assert main_pane.sent[-1] == ("codex resume session-worker-1", True)
 
     boss_pane = monkeypatch_server.sessions[0].windows[0].panes[1]
@@ -163,7 +162,6 @@ def test_tmux_layout_manager_recreates_existing_session(monkeypatch_server):
         monitor=monitor,
         root_path=Path("/repo"),
         session_namespace="session-a",
-        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     # Simulate pre-existing session
@@ -186,7 +184,6 @@ def test_fork_boss_interrupts_before_resume(monkeypatch_server):
         startup_delay=0.0,
         backtrack_delay=0.0,
         session_namespace="session-a",
-        codex_home=Path("/repo/.parallel-dev/sessions/session-a/codex-home"),
     )
 
     layout = manager.ensure_layout(session_name="parallel-dev", worker_count=1)
