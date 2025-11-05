@@ -16,6 +16,7 @@ def test_monitor_registers_and_logs_instruction(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=tmp_path / "codex",
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     rollout = tmp_path / "sessions" / "rollout-main.jsonl"
@@ -42,6 +43,7 @@ def test_monitor_bind_existing_session(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=tmp_path / "codex",
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     rollout = tmp_path / "sessions" / "rollout-existing.jsonl"
@@ -69,6 +71,7 @@ def test_monitor_waits_for_done(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=tmp_path / "codex",
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     rollout_a = tmp_path / "sessions" / "rollout-a.jsonl"
@@ -116,6 +119,7 @@ def test_monitor_force_completion_during_wait(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=tmp_path / "codex",
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     rollout = tmp_path / "sessions" / "rollout-force.jsonl"
@@ -140,6 +144,7 @@ def test_monitor_detects_new_sessions(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=codex_root,
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     codex_root.mkdir(parents=True, exist_ok=True)
@@ -203,6 +208,7 @@ def test_monitor_worker_rollouts_timeout(tmp_path: Path):
         session_map_path=session_map,
         codex_sessions_root=codex_root,
         poll_interval=0.01,
+        session_namespace="test-session",
     )
 
     baseline = monitor.snapshot_rollouts()

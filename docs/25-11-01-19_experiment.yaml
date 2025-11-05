@@ -320,3 +320,14 @@
   - uv run pytest
   result: tests 89 passed
   notes: 04:45対応のEnterブロードキャストは撤回。フォーク後は従来通りワーカーが手動でEnter入力して指示を送信する運用に戻した
+- date: '2025-11-05'
+  time_utc: '07:30:00'
+  summary: Codexセッション共有時の衝突を防止
+  details:
+  - Codex CLIが~/.codex/sessionsのみを参照する仕様に合わせ、`codex_home_mode`の既定値を`shared`へ変更
+  - CodexMonitorにセッションレジストリを導入し、別namespaceが同じsession_idを占有しようとした場合はエラーで検知（終了済みPIDのロックは自動解放）
+  - worker完了時にレジストリを解放し、ユニットテストをnamespace付きで更新
+  reproduce:
+  - uv run pytest
+  result: tests 89 passed
+  notes: 並列にpdevを起動しても`.codex/sessions`を共有しつつ、session_idの取り合いによる混線が起きないことを狙った対応

@@ -1162,6 +1162,7 @@ def build_orchestrator(
         logs_dir=base_logs_dir,
         session_map_path=session_map_path,
         codex_sessions_root=codex_sessions_root,
+        session_namespace=session_namespace,
     )
     tmux_manager = TmuxLayoutManager(
         session_name=session_name,

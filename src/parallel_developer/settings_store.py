@@ -11,7 +11,7 @@ from typing import Dict, Optional
 @dataclass
 class SettingsData:
     attach_mode: str = "auto"
-    codex_home_mode: str = "session"
+    codex_home_mode: str = "shared"
     boss_mode: str = "score"
 
 
@@ -75,7 +75,7 @@ class SettingsStore:
             return SettingsData()
         return SettingsData(
             attach_mode=str(payload.get("attach_mode", "auto")),
-            codex_home_mode=str(payload.get("codex_home_mode", "session")),
+            codex_home_mode=str(payload.get("codex_home_mode", "shared")),
             boss_mode=str(payload.get("boss_mode", "score")),
         )
 

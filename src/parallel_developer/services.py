@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import time
@@ -400,6 +401,7 @@ class CodexMonitor:
         *,
         codex_sessions_root: Optional[Path] = None,
         poll_interval: float = 1.0,
+        session_namespace: Optional[str] = None,
     ) -> None:
         self.logs_dir = Path(logs_dir)
         self.session_map_path = Path(session_map_path)
@@ -413,6 +415,9 @@ class CodexMonitor:
             if codex_sessions_root is not None
             else Path.home() / ".codex" / "sessions"
         )
+        self._session_namespace = session_namespace or "default"
+        self._registry_dir = self.session_map_path.parent / "codex_session_registry"
+        self._owned_sessions: Set[str] = set()
         self._forced_done: Set[str] = set()
 
     def register_session(self, *, pane_id: str, session_id: str, rollout_path: Path) -> None:
@@ -435,6 +440,7 @@ class CodexMonitor:
             "offset": int(offset),
         }
         self._write_map(data)
+        self._reserve_session(session_id, rollout_path)
 
     def bind_existing_session(self, *, pane_id: str, session_id: str) -> None:
         data = self._load_map()
@@ -653,6 +659,79 @@ class CodexMonitor:
         for session_id in session_ids:
             if session_id:
                 self._forced_done.add(session_id)
+                self._release_session(session_id)
+
+    def _reserve_session(self, session_id: str, rollout_path: Path) -> None:
+        try:
+            self._registry_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        metadata = {
+            "session_id": session_id,
+            "namespace": self._session_namespace,
+            "pid": os.getpid(),
+            "timestamp": time.time(),
+            "rollout_path": str(rollout_path),
+        }
+        record_path = self._registry_dir / f"{session_id}.json"
+        while True:
+            try:
+                with record_path.open("x", encoding="utf-8") as fh:
+                    json.dump(metadata, fh, ensure_ascii=False)
+                self._owned_sessions.add(session_id)
+                return
+            except FileExistsError:
+                try:
+                    existing = json.loads(record_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing = {}
+                owner_ns = existing.get("namespace")
+                owner_pid = existing.get("pid")
+                if owner_ns == self._session_namespace:
+                    try:
+                        record_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+                        self._owned_sessions.add(session_id)
+                    except OSError:
+                        pass
+                    return
+                if owner_pid and not self._pid_exists(owner_pid):
+                    try:
+                        record_path.unlink()
+                    except OSError:
+                        break
+                    continue
+                raise RuntimeError(
+                    f"Codex session {session_id} is currently reserved by namespace '{owner_ns}'. "
+                    "別の parallel-dev インスタンスが使用中のため、処理を中断します。"
+                )
+            except OSError:
+                return
+
+    def _release_session(self, session_id: str) -> None:
+        record_path = self._registry_dir / f"{session_id}.json"
+        try:
+            existing = json.loads(record_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._owned_sessions.discard(session_id)
+            return
+        if existing.get("namespace") == self._session_namespace:
+            try:
+                record_path.unlink()
+            except OSError:
+                pass
+            self._owned_sessions.discard(session_id)
+
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def wait_for_rollout_activity(
         self,
