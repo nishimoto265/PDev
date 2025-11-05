@@ -69,7 +69,25 @@ class TmuxLayoutManager:
             "boss": panes[1].pane_id,
             "workers": [pane.pane_id for pane in panes[2 : 2 + self.worker_count]],
         }
+        self._apply_role_labels(session, layout)
         return layout
+
+    def _apply_role_labels(self, session, layout: Mapping[str, Any]) -> None:
+        try:
+            self._set_pane_title(session, layout.get("main"), "MAIN")
+            self._set_pane_title(session, layout.get("boss"), "BOSS")
+            for index, pane_id in enumerate(layout.get("workers", []), start=1):
+                self._set_pane_title(session, pane_id, f"WORKER-{index}")
+        except Exception:  # pragma: no cover - defensive fallback for tmux failures
+            pass
+
+    def _set_pane_title(self, session, pane_id: Optional[str], title: str) -> None:
+        if not pane_id:
+            return
+        try:
+            session.cmd("select-pane", "-t", pane_id, "-T", title)
+        except Exception:  # pragma: no cover - tmux may be older than 3.2
+            pass
 
     def _split_largest_pane(self, window) -> None:
         panes = list(window.panes)
@@ -190,6 +208,7 @@ class TmuxLayoutManager:
     def _get_or_create_session(self, fresh: bool = False):
         session = self._server.find_where({"session_name": self.session_name})
         if session is not None and not fresh:
+            self._configure_session(session)
             return session
 
         kill_existing = fresh and session is not None
@@ -198,6 +217,7 @@ class TmuxLayoutManager:
             attach=False,
             kill_session=kill_existing,
         )
+        self._configure_session(session)
         return session
 
     def _get_pane(self, pane_id: str):
@@ -243,6 +263,22 @@ class TmuxLayoutManager:
             pane.send_keys(key, enter=enter)
         if self.backtrack_delay > 0:
             time.sleep(self.backtrack_delay)
+
+    def _configure_session(self, session) -> None:
+        commands = [
+            ("set-option", "-g", "mouse", "on"),
+            ("set-option", "-g", "pane-border-style", "fg=green"),
+            ("set-option", "-g", "pane-active-border-style", "fg=orange"),
+            ("set-option", "-g", "pane-border-status", "top"),
+            ("set-option", "-g", "pane-border-format", "#{pane_title}"),
+            ("set-option", "-g", "display-panes-colour", "green"),
+            ("set-option", "-g", "display-panes-active-colour", "orange"),
+        ]
+        for args in commands:
+            try:
+                session.cmd(*args)
+            except Exception:  # pragma: no cover - 一部オプション非対応のtmux向けフォールバック
+                continue
 
 
 class WorktreeManager:

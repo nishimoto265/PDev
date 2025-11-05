@@ -47,6 +47,11 @@ class DummySession:
         self.session_name = name
         self.windows = [DummyWindow()]
         self.attached_window = self.windows[0]
+        self.cmd_calls = []
+
+    def cmd(self, *args):
+        self.cmd_calls.append(args)
+        return self
 
 
 class DummyServer:
@@ -92,6 +97,16 @@ def test_tmux_layout_manager_allocates_panes(monkeypatch_server):
     assert layout["main"] == "%0"
     assert layout["boss"] == "%1"
     assert layout["workers"] == ["%2", "%3"]
+
+    session_cmds = monkeypatch_server.sessions[0].cmd_calls
+    assert ("set-option", "-g", "mouse", "on") in session_cmds
+    assert ("set-option", "-g", "pane-border-style", "fg=green") in session_cmds
+    assert ("set-option", "-g", "pane-active-border-style", "fg=orange") in session_cmds
+    assert ("set-option", "-g", "pane-border-format", "#{pane_title}") in session_cmds
+    assert ("select-pane", "-t", "%0", "-T", "MAIN") in session_cmds
+    assert ("select-pane", "-t", "%1", "-T", "BOSS") in session_cmds
+    assert ("select-pane", "-t", "%2", "-T", "WORKER-1") in session_cmds
+    assert ("select-pane", "-t", "%3", "-T", "WORKER-2") in session_cmds
 
     manager.launch_main_session(pane_id=layout["main"])
     manager.launch_boss_session(pane_id=layout["boss"])

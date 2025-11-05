@@ -275,3 +275,15 @@
   - uv run pytest
   result: tests 87 passed
   notes: backtrack_delayを維持しつつステップ毎のsleepへ変更したことで、安定性を保ちながら体感レスポンスを改善
+- date: '2025-11-05'
+  time_utc: '05:05:00'
+  summary: tmuxセッションのUIを視認性重視に再構成
+  details:
+  - TmuxLayoutManager.ensure_layoutでpaneタイトルをMAIN/BOSS/WORKER-Nに設定し、pane-border-status topを有効化して役割を常時表示
+  - tmuxのマウス操作を有効化し、クリックでペイン選択・ドラッグでリサイズできるようマウスサポートをオンに設定
+  - 枠線色を通常=緑、アクティブ=オレンジに統一し、display-panesのカラーも同系色へ変更して視認性を向上
+  - tmuxマネージャテストを更新し、オプション設定・タイトル付与が行われることを検証
+  reproduce:
+  - uv run pytest
+  result: tests 87 passed
+  notes: tmux 3.x 系を前提にしつつ、古いバージョンでコマンド失敗しても処理継続できるよう例外を無視するガードを追加
