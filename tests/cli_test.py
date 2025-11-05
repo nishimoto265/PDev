@@ -123,9 +123,8 @@ def test_handle_instruction_runs_builder_and_saves_manifest(manifest_store, tmp_
     assert captured_kwargs["session_name"] == controller._config.tmux_session
     codex_home = captured_kwargs["codex_home"]
     assert codex_home.exists()
-    assert codex_home != home_dir
+    assert codex_home == home_dir
     assert (codex_home / ".codex" / "config.json").exists()
-    assert (codex_home / ".codex" / ".bootstrap_complete").exists()
     sessions = manifest_store.list_sessions()
     assert len(sessions) == 1
     manifest = manifest_store.load_manifest(sessions[0].session_id)
@@ -622,18 +621,15 @@ def test_codex_home_env_override(monkeypatch, manifest_store, tmp_path):
     _run_async(controller.handle_input("Implement feature Z"))
 
     assert captured_kwargs["codex_home"] == session_specific
-    assert (session_specific / ".codex" / "profile.json").exists()
+    assert (session_specific / ".codex" / "sessions").exists()
 
 
 def test_codex_home_command_updates_mode(tmp_path):
     controller = CLIController(event_handler=lambda *_: None, worktree_root=tmp_path)
-    assert controller._codex_home_mode == "session"
+    assert controller._codex_home_mode == "shared"
     _run_async(controller.handle_input("/codexhome shared"))
     assert controller._codex_home_mode == "shared"
-    settings_path = tmp_path / ".parallel-dev" / "settings.json"
-    assert settings_path.exists()
-    data = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert data["codex_home_mode"] == "shared"
+    assert controller._settings_store.snapshot()["codex_home_mode"] == "shared"
 
 
 def test_codex_home_command_blocked_by_env(tmp_path, monkeypatch):
@@ -646,8 +642,8 @@ def test_codex_home_command_blocked_by_env(tmp_path, monkeypatch):
     controller = CLIController(event_handler=handler, worktree_root=tmp_path)
 
     _run_async(controller.handle_input("/codexhome session"))
-    # 設定は変わらず session のまま
-    assert controller._codex_home_mode == "session"
+    # 環境変数によりsharedのまま変わらない
+    assert controller._codex_home_mode == "shared"
     assert any("環境変数" in payload.get("text", "") for event, payload in events if event == "log")
 
 

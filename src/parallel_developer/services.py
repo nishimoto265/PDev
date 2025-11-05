@@ -246,9 +246,6 @@ class TmuxLayoutManager:
         pane.send_keys(f"\x1b[200~{payload}\x1b[201~", enter=True)
 
     def _codex_command(self, command: str) -> str:
-        if self.codex_home:
-            home = shlex.quote(str(self.codex_home))
-            return f"env HOME={home} {command}"
         return command
 
     def _broadcast_keys(self, pane_ids: Sequence[str], key: str, *, enter: bool) -> None:
@@ -441,6 +438,7 @@ class CodexMonitor:
         }
         self._write_map(data)
         self._reserve_session(session_id, rollout_path)
+        self._mirror_rollout_to_bridge(session_id, rollout_path)
 
     def bind_existing_session(self, *, pane_id: str, session_id: str) -> None:
         data = self._load_map()
@@ -732,6 +730,19 @@ class CodexMonitor:
         except PermissionError:
             return True
         return True
+
+    def _mirror_rollout_to_bridge(self, session_id: str, rollout_path: Path) -> None:
+        bridge_dir = self.codex_sessions_root / "bridge"
+        try:
+            bridge_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+
+        target = bridge_dir / f"{session_id}.jsonl"
+        try:
+            shutil.copyfile(rollout_path, target)
+        except OSError:
+            pass
 
     def wait_for_rollout_activity(
         self,
