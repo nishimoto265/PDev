@@ -138,6 +138,7 @@ class ParallelDeveloperApp(App):
                 self.log_panel = EventLog(id="log", max_lines=400)
                 yield self.log_panel
                 self.selection_list = OptionList(id="selection")
+                self.selection_list._allow_focus = True
                 self.selection_list.display = False
                 yield self.selection_list
                 self.command_palette = CommandPalette(id="command-palette")
@@ -290,6 +291,10 @@ class ParallelDeveloperApp(App):
                     self.selection_list.add_option(option)
                 self.selection_list.display = True
                 self.selection_list.focus()
+                try:
+                    self.selection_list.cursor_index = 0
+                except AttributeError:
+                    pass
             if self.command_input:
                 self.command_input.display = False
         elif event.event_type == "selection_finished":
@@ -546,13 +551,6 @@ class ParallelDeveloperApp(App):
                 return
             self.controller._resolve_selection(index)
             return
-        if self.command_palette and self.command_palette.display:
-            event.stop()
-            item = self.command_palette.get_active_item()
-            if item:
-                await self._handle_palette_selection(item)
-
-    async def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if self.command_palette and self.command_palette.display:
             event.stop()
             item = self.command_palette.get_active_item()
