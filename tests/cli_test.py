@@ -10,6 +10,7 @@ import sys
 from unittest.mock import Mock
 
 import pytest
+import yaml
 import git
 
 from parallel_developer.controller import CLIController, SessionMode, TmuxAttachManager
@@ -620,7 +621,7 @@ def test_attach_mode_persists_between_runs(tmp_path, monkeypatch):
     controller._attach_manager.session_exists = Mock(return_value=True)
 
     _run_async(controller.handle_input("/attach manual"))
-    settings_path = tmp_path / ".parallel-dev" / "settings.json"
+    settings_path = tmp_path / ".parallel-dev" / "settings.yaml"
     assert settings_path.exists()
 
     controller2 = CLIController(
@@ -674,8 +675,8 @@ def test_boss_command_updates_mode(monkeypatch, manifest_store, tmp_path):
     assert controller._config.boss_mode == BossMode.REWRITE
     _run_async(controller.handle_input("Implement feature"))
     assert captured_kwargs["boss_mode"] == BossMode.REWRITE
-    settings_path = tmp_path / ".parallel-dev" / "settings.json"
-    assert json.loads(settings_path.read_text(encoding="utf-8"))["boss_mode"] == "rewrite"
+    settings_path = tmp_path / ".parallel-dev" / "settings.yaml"
+    assert yaml.safe_load(settings_path.read_text(encoding="utf-8"))["boss_mode"] == "rewrite"
 
 
 def test_boss_command_reports_current_mode(tmp_path, caplog):

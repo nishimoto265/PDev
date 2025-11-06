@@ -228,9 +228,14 @@ class ParallelDeveloperApp(App):
         remainder = remainder.strip()
         filtered: List[PaletteItem] = []
         for opt in options:
-            label = opt.label
+            label = self._format_option_label(opt)
             value_str = str(opt.value)
-            if not remainder or value_str.startswith(remainder) or label.lower().startswith(remainder.lower()):
+            search_text = (opt.label + " " + (opt.description or "")).lower()
+            if (
+                not remainder
+                or value_str.startswith(remainder)
+                or search_text.startswith(remainder.lower())
+            ):
                 filtered.append(PaletteItem(label, opt.value))
         if not filtered:
             self._last_command_text = value
@@ -383,6 +388,12 @@ class ParallelDeveloperApp(App):
             return
         items = [PaletteItem(f"{s.name:<10} {s.description}", s.name) for s in suggestions]
         self._show_command_palette(items, mode="command")
+
+    def _format_option_label(self, option: CommandOption) -> str:
+        description = getattr(option, "description", None)
+        if description:
+            return f"{option.label} — {description}"
+        return option.label
 
     def _show_command_palette(self, items: List[PaletteItem], *, mode: str) -> None:
         if not self.command_palette:

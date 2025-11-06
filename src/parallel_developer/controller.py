@@ -210,7 +210,7 @@ class CLIController:
         self._queued_instruction: Optional[str] = None
         self._continue_future: Optional[Future] = None
         self._attach_manager = TmuxAttachManager()
-        settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.json")
+        settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.yaml")
         self._settings_store = SettingsStore(settings_path)
         self._attach_mode: str = self._settings_store.attach_mode
         saved_boss_mode = self._settings_store.boss_mode
@@ -225,6 +225,11 @@ class CLIController:
             self._flow_mode = FlowMode.MANUAL
         self._config.flow_mode = self._flow_mode
         self._auto_commit_enabled: bool = bool(self._settings_store.auto_commit)
+        self._config.worker_count = max(1, int(self._settings_store.worker_count))
+        try:
+            self._config.mode = SessionMode(self._settings_store.session_mode)
+        except ValueError:
+            self._config.mode = SessionMode.PARALLEL
         self._session_namespace: str = self._config.session_id
         self._last_started_main_session_id: Optional[str] = None
         self._pre_cycle_selected_session: Optional[str] = None
@@ -514,6 +519,7 @@ class CLIController:
             self._emit("log", {"text": "ワーカー数は1以上で指定してください。"})
             return
         self._config.worker_count = value
+        self._settings_store.worker_count = value
         self._emit_status("設定を更新しました。")
 
     async def _cmd_mode(self, option: Optional[object]) -> None:
@@ -522,6 +528,7 @@ class CLIController:
             self._emit("log", {"text": "使い方: /mode main | /mode parallel"})
             return
         self._config.mode = SessionMode(mode)
+        self._settings_store.session_mode = mode
         self._emit_status("設定を更新しました。")
 
     async def _cmd_resume(self, option: Optional[object]) -> None:
