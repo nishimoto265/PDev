@@ -411,3 +411,4 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
     assert len(boss_calls) >= 2
     assert "Boss integration phase" in boss_calls[1]
     assert "Before you edit anything" in boss_calls[1]
+    assert "Do not output the JSON scoreboard again" in boss_calls[1]
