@@ -470,6 +470,47 @@ class CodexMonitor:
                 pane_entry["offset"] = int(size)
         self._write_map(data)
 
+    def refresh_session_id(self, session_id: str) -> str:
+        data = self._load_map()
+        sessions = data.get("sessions", {})
+        entry = sessions.get(session_id)
+        if entry is None or not session_id.startswith("unknown-"):
+            return session_id
+
+        rollout_path = Path(entry.get("rollout_path", ""))
+        actual_id = self._extract_session_meta(rollout_path)
+        if not actual_id or actual_id.startswith("unknown-"):
+            return session_id
+
+        entry["session_id"] = actual_id
+        sessions.pop(session_id, None)
+        sessions[actual_id] = entry
+
+        panes = data.get("panes", {})
+        for pane_entry in panes.values():
+            if pane_entry.get("session_id") == session_id:
+                pane_entry["session_id"] = actual_id
+
+        self._write_map(data)
+
+        if session_id in self._owned_sessions:
+            self._owned_sessions.discard(session_id)
+            self._owned_sessions.add(actual_id)
+        if session_id in self._forced_done:
+            self._forced_done.discard(session_id)
+            self._forced_done.add(actual_id)
+
+        if self._registry_dir.exists():
+            old_record = self._registry_dir / f"{session_id}.json"
+            new_record = self._registry_dir / f"{actual_id}.json"
+            if old_record.exists():
+                try:
+                    old_record.rename(new_record)
+                except OSError:
+                    pass
+
+        return actual_id
+
     def bind_existing_session(self, *, pane_id: str, session_id: str) -> None:
         data = self._load_map()
         sessions = data.setdefault("sessions", {})
@@ -815,6 +856,13 @@ class CodexMonitor:
             time.sleep(self.poll_interval)
 
     def _parse_session_meta(self, rollout_path: Path) -> str:
+        session_id = self._extract_session_meta(rollout_path)
+        if session_id:
+            return session_id
+        suffix = int(time.time() * 1000)
+        return f"unknown-{suffix}"
+
+    def _extract_session_meta(self, rollout_path: Path) -> Optional[str]:
         try:
             with rollout_path.open("r", encoding="utf-8") as fh:
                 for line in fh:
@@ -823,11 +871,12 @@ class CodexMonitor:
                     except json.JSONDecodeError:
                         continue
                     if obj.get("type") == "session_meta" and "payload" in obj:
-                        return obj["payload"].get("id")
+                        ident = obj["payload"].get("id")
+                        if ident:
+                            return str(ident)
         except FileNotFoundError:
             pass
-        suffix = int(time.time() * 1000)
-        return f"unknown-{suffix}"
+        return None
 
     def _load_map(self) -> Dict[str, Any]:
         text = self.session_map_path.read_text(encoding="utf-8")

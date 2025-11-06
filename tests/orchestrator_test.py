@@ -23,6 +23,7 @@ def dependencies():
     worktree.worker_branch.side_effect = lambda name: f"parallel-dev/session-a/{name}"
     monitor = Mock(name="monitor")
     monitor.consume_session_until_eof = Mock(name="consume_session_until_eof")
+    monitor.refresh_session_id = Mock(name="refresh_session_id", side_effect=lambda sid: sid)
     monitor.bind_existing_session = Mock(name="bind_existing_session")
     logger = Mock(name="log_manager")
 
@@ -185,6 +186,7 @@ def test_orchestrator_runs_happy_path(dependencies):
         session_id="session-boss",
         pane_id="pane-main",
     )
+    monitor.refresh_session_id.assert_called()
     assert monitor.bind_existing_session.call_args_list[-1] == call(
         pane_id="pane-main",
         session_id="session-boss",
@@ -388,6 +390,7 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
 
     orchestrator.run_cycle(dependencies["instruction"], selector=selector)
 
+    assert monitor.refresh_session_id.called
     calls = monitor.consume_session_until_eof.call_args_list
     assert calls[-1] == call("session-worker-1")
     boss_calls = [

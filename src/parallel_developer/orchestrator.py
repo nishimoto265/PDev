@@ -582,6 +582,7 @@ class Orchestrator:
         metrics: Optional[Mapping[str, Mapping[str, Any]]],
     ) -> tuple[SelectionDecision, Dict[str, Dict[str, Any]]]:
         base_scoreboard = self._build_scoreboard(candidates, completion_info, metrics)
+        candidate_map = {candidate.key: candidate for candidate in candidates}
         if selector is None:
             raise RuntimeError(
                 "Selection requires a selector; automatic boss scoring is not available."
@@ -591,6 +592,21 @@ class Orchestrator:
             decision = selector(candidates, base_scoreboard)
         except TypeError:
             decision = selector(candidates)
+
+        selected_candidate = candidate_map.get(decision.selected_key)
+        if selected_candidate and selected_candidate.session_id:
+            refresh = getattr(self._monitor, "refresh_session_id", None)
+            if callable(refresh):
+                try:
+                    resolved_id = refresh(selected_candidate.session_id)
+                except Exception:
+                    resolved_id = selected_candidate.session_id
+                else:
+                    if resolved_id and resolved_id != selected_candidate.session_id:
+                        selected_candidate.session_id = resolved_id
+                        entry = base_scoreboard.get(decision.selected_key)
+                        if entry is not None:
+                            entry["session_id"] = resolved_id
 
         scoreboard = self._apply_selection(base_scoreboard, decision)
         return decision, scoreboard
