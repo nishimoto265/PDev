@@ -337,7 +337,6 @@ class Orchestrator:
             main_session_id,
             timeout_seconds=10.0,
         )
-        self._tmux.interrupt_pane(pane_id=layout.main_pane)
         self._monitor.capture_instruction(
             pane_id=layout.main_pane,
             instruction=fork_prompt,
@@ -515,6 +514,7 @@ class Orchestrator:
         selected: CandidateInfo,
         main_pane: str,
     ) -> None:
+        self._tmux.interrupt_pane(pane_id=main_pane)
         if selected.branch:
             self._worktree.merge_into_main(selected.branch)
         if selected.session_id:
