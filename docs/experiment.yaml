@@ -396,3 +396,15 @@
   - uv run pytest
   result: tests 95 passed
   notes: ログはクリックすれば従来どおり選択でき、Tabでは入力欄に留まることを確認
+- date: '2025-11-06'
+  time_utc: '03:05:00'
+  summary: 擬似オーケストレータを用いた統合フローの自動化テストを追加
+  details:
+  - FlowMode Full Auto を設定し、擬似的なworker/bossセッションを返すオーケストレーターで1サイクル完走を再現するpytestを作成
+  - Candidate情報とスコアボードを与えて自動選択が発火すること、マニフェスト保存が行われること、scoreboard/logイベントが流れることを検証
+  - 実装後に新規テストのみ・全体のpytestを実行し、96ケースの成功を確認
+  reproduce:
+  - uv run pytest tests/25-11-06-03_integration_flow_test.py -q
+  - uv run pytest
+  result: tests 96 passed
+  notes: tmuxや実Codexは起動せずに擬似的なセッションIDとログパスで挙動を検証
