@@ -111,8 +111,6 @@ class ParallelDeveloperApp(App):
     BINDINGS = [
         ("ctrl+q", "quit", "終了"),
         ("escape", "close_palette", "一時停止/巻き戻し"),
-        ("tab", "palette_next", "次候補"),
-        ("shift+tab", "palette_previous", "前候補"),
     ]
 
     def __init__(self) -> None:
@@ -466,10 +464,28 @@ class ParallelDeveloperApp(App):
         if also_log and self.log_panel:
             self.log_panel.log(message)
 
+    def _handle_tab_navigation(self, *, reverse: bool = False) -> None:
+        palette = self.command_palette
+        palette_visible = bool(palette and palette.display)
+        if palette_visible:
+            if reverse:
+                self.action_palette_previous()
+            else:
+                self.action_palette_next()
+        if self.command_input:
+            self.command_input.focus()
+
     def on_key(self, event: events.Key) -> None:
         if self._handle_ctrl_c(event):
             return
         if self._handle_text_shortcuts(event):
+            return
+        key_value = (event.key or "").lower()
+        name_value = (event.name or "").lower()
+        if key_value in {"tab", "shift+tab"} or name_value in {"tab", "shift_tab"}:
+            event.stop()
+            event.prevent_default()
+            self._handle_tab_navigation(reverse=key_value == "shift+tab" or name_value == "shift_tab")
             return
 
     def _handle_text_shortcuts(self, event: events.Key) -> bool:

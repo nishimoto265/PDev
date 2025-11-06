@@ -129,6 +129,24 @@ class CommandTextArea(TextArea):
             self.insert("\n")
             return
 
+        if key == "tab" or name == "tab" or "tab" in aliases:
+            event.stop()
+            event.prevent_default()
+            self._shift_next_enter = False  # type: ignore[attr-defined]
+            handler = getattr(self.app, "_handle_tab_navigation", None)
+            if callable(handler):
+                handler(reverse=False)
+            return
+
+        if key == "shift+tab" or name == "shift_tab" or "shift+tab" in aliases:
+            event.stop()
+            event.prevent_default()
+            self._shift_next_enter = False  # type: ignore[attr-defined]
+            handler = getattr(self.app, "_handle_tab_navigation", None)
+            if callable(handler):
+                handler(reverse=True)
+            return
+
         if key == "enter":
             event.stop()
             event.prevent_default()

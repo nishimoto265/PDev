@@ -384,3 +384,15 @@
   - uv run pytest
   result: tests 92 passed
   notes: 極端に狭い高さではstatusが最小化されるが、要求どおりの優先度で縮小していることを確認
+- date: '2025-11-06'
+  time_utc: '02:56:00'
+  summary: Tabキー操作で入力欄フォーカスを維持しつつコマンドパレットを巡回できるよう改修
+  details:
+  - UIテストにTab挙動を検証するケース（入力欄維持・ログからの復帰・パレット巡回）を追加して期待仕様を先に失敗させた
+  - `CommandTextArea`と`ParallelDeveloperApp`でTab/Shift+Tabのキー処理を上書きし、パレット表示時のみ候補を前後移動しつつ常に入力欄へフォーカスを戻すよう調整
+  - 既存のTabショートカットバインディングを廃止し、フォーカス遷移の競合を避けたうえでpytest全体を再実行
+  reproduce:
+  - uv run pytest tests/25-11-02-22_pdev_ui_test.py -k tab -q
+  - uv run pytest
+  result: tests 95 passed
+  notes: ログはクリックすれば従来どおり選択でき、Tabでは入力欄に留まることを確認

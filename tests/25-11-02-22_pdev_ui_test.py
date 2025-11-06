@@ -190,6 +190,55 @@ async def test_command_palette_arrow_moves_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tab_keeps_focus_on_command_input() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        command_input = app.query_one("#command", CommandTextArea)
+        log_widget = app.query_one("#log", EventLog)
+        assert command_input.has_focus
+        await pilot.press("tab")
+        await pilot.pause()
+        assert command_input.has_focus
+        assert not log_widget.has_focus
+
+
+@pytest.mark.asyncio
+async def test_tab_from_log_returns_to_input() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        command_input = app.query_one("#command", CommandTextArea)
+        log_widget = app.query_one("#log", EventLog)
+        await pilot.click("#log")
+        await pilot.pause()
+        assert log_widget.has_focus
+        await pilot.press("tab")
+        await pilot.pause()
+        assert command_input.has_focus
+        assert not log_widget.has_focus
+
+
+@pytest.mark.asyncio
+async def test_tab_cycles_palette_selection() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        palette = app.query_one("#command-palette", CommandPalette)
+        first = palette._active_index
+        await pilot.press("tab")
+        await pilot.pause()
+        second = palette._active_index
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        third = palette._active_index
+        assert second != first
+        assert third == first
+
+
+@pytest.mark.asyncio
 async def test_command_input_cursor_end_moves_to_last_character() -> None:
     app = ParallelDeveloperApp()
     async with app.run_test() as pilot:  # type: ignore[attr-defined]
