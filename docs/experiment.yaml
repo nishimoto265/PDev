@@ -451,3 +451,13 @@
   - uv run python dev_test/evening.py
   result: Good evening, world!が標準出力に表示される
   notes: 命名規則両立のため互換レイヤーを追加
+- date: '2025-11-06'
+  time_utc: '06:32:46'
+  summary: dev_testへEVENING2スクリプトを追加
+  details:
+  - dev_test/25-11-06-15_evening2.pyを新規作成し、TTD前の雛形として配置
+  - 既存のスクリプト命名規則に合わせてYY-MM-DD-HHプレフィックスを付与
+  reproduce:
+  - uv run python dev_test/25-11-06-15_evening2.py
+  result: (未実装)
+  notes: 実装とテストは今後のTTDサイクルで追加予定
