@@ -507,3 +507,15 @@
   - uv run pytest
   result: tests 97 passed
   notes: メインpaneではファイル変更を行わず、ワーカー側だけが専用ワークツリーで作業する運用を明文化
+- date: '2025-11-06'
+  time_utc: '13:45:00'
+  summary: /commitコマンドと自動コミット実行を追加
+  details:
+  - `/commit manual` で即時のGitコミット、`/commit auto` でサイクル開始前の自動コミットを切り替えるコマンドを実装
+  - SettingsStoreに `auto_commit` を保存し、WorkflowManager.run_instruction の冒頭で自動コミットを実行
+  - Gitリポジトリが未初期化の場合はエラーメッセージを表示し、変更が無い場合は自動モードでは静かにスキップする挙動に調整
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py -q
+  - uv run pytest
+  result: tests 97 passed
+  notes: コミットメッセージは `pdev-auto-save`/`pdev-manual-save` プレフィックスで統一し、履歴追跡しやすくした

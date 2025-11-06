@@ -26,6 +26,8 @@ class WorkflowManager:
             c._emit("log", {"text": "候補選択待ちです。/pick <n> で選択してください。"})
             return
 
+        c._maybe_auto_commit()
+
         c._cycle_counter += 1
         cycle_id = c._cycle_counter
         c._current_cycle_id = cycle_id

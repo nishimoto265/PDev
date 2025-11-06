@@ -16,6 +16,8 @@ import shlex
 import shutil
 from subprocess import PIPE
 
+import git
+
 from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision
 from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
@@ -221,6 +223,7 @@ class CLIController:
         except ValueError:
             self._flow_mode = FlowMode.MANUAL
         self._config.flow_mode = self._flow_mode
+        self._auto_commit_enabled: bool = bool(self._settings_store.auto_commit)
         self._session_namespace: str = self._config.session_id
         self._last_started_main_session_id: Optional[str] = None
         self._pre_cycle_selected_session: Optional[str] = None
@@ -350,6 +353,14 @@ class CLIController:
                 options=[
                     CommandOption("copy", "copy"),
                     CommandOption("save", "save"),
+                ],
+            ),
+            "/commit": CommandSpecEntry(
+                "作業内容をGitコミットする（manual/auto）",
+                self._cmd_commit,
+                options=[
+                    CommandOption("manual", "manual"),
+                    CommandOption("auto", "auto"),
                 ],
             ),
             "/status": CommandSpecEntry(
@@ -556,6 +567,23 @@ class CLIController:
             return
         self._emit("log", {"text": "使い方: /log copy | /log save <path>"})
 
+    async def _cmd_commit(self, option: Optional[object]) -> None:
+        mode = "manual"
+        if option is not None:
+            mode = str(option).lower()
+        if mode == "manual":
+            self._perform_commit(auto=False, quiet_when_no_change=False)
+            return
+        if mode == "auto":
+            self._auto_commit_enabled = not self._auto_commit_enabled
+            self._settings_store.auto_commit = self._auto_commit_enabled
+            state = "有効" if self._auto_commit_enabled else "無効"
+            self._emit("log", {"text": f"自動コミットを{state}にしました。"})
+            if self._auto_commit_enabled:
+                self._perform_commit(auto=True, quiet_when_no_change=True)
+            return
+        self._emit("log", {"text": "/commit は manual または auto を指定してください。"})
+
     def _find_resume_index_by_session(self, token: str) -> Optional[int]:
         if not self._resume_options:
             self._resume_options = self._manifest_store.list_sessions()
@@ -697,6 +725,40 @@ class CLIController:
             return
         self._input_history.append(entry)
         self._history_cursor = len(self._input_history)
+
+    def _perform_commit(self, *, auto: bool, quiet_when_no_change: bool) -> bool:
+        try:
+            repo = git.Repo(self._worktree_root)
+        except git.exc.InvalidGitRepositoryError:
+            self._emit("log", {"text": "Gitリポジトリが存在しません。`git init` を実行してください。"})
+            return False
+
+        if not repo.is_dirty(untracked_files=True):
+            if not quiet_when_no_change:
+                self._emit("log", {"text": "コミット対象の変更がありません。"})
+            return False
+
+        try:
+            repo.git.add(A=True)
+        except Exception as exc:  # noqa: BLE001
+            self._emit("log", {"text": f"git add に失敗しました: {exc}"})
+            return False
+
+        prefix = "pdev-auto-save" if auto else "pdev-manual-save"
+        message = f"{prefix} {datetime.utcnow().isoformat(timespec='seconds')}Z"
+        try:
+            repo.index.commit(message)
+        except Exception as exc:  # noqa: BLE001
+            self._emit("log", {"text": f"コミットに失敗しました: {exc}"})
+            return False
+
+        self._emit("log", {"text": f"変更をコミットしました: {message}"})
+        return True
+
+    def _maybe_auto_commit(self) -> None:
+        if not getattr(self, "_auto_commit_enabled", False):
+            return
+        self._perform_commit(auto=True, quiet_when_no_change=True)
 
     def _request_selection(self, candidates: List[CandidateInfo], scoreboard: Optional[Dict[str, Dict[str, object]]] = None) -> Future:
         future: Future = Future()
