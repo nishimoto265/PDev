@@ -780,7 +780,7 @@ class Orchestrator:
             "Integration tasks:\n"
             "- Review the worker outputs you just scored and decide how to combine or refine them.\n"
             "- If one worker result already satisfies the goal, copy or adjust it here; otherwise merge or refactor the strongest parts so this boss worktree becomes the final solution.\n\n"
-            "Do not output the JSON scoreboard again. Produce the final merged solution here, then respond with /done when the implementation is complete."
+            "When the implementation is complete, respond with /done."
         )
 
     def _wait_for_boss_scores(self, boss_session_id: str, timeout: float = 120.0) -> Dict[str, Dict[str, Any]]:
