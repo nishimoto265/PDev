@@ -495,3 +495,15 @@
   - uv run python dev_test/evening.py
   result: Good evening, world!が標準出力に表示される
   notes: 25-11-06-15_evening.pyのログにより動作追跡が可能であるため、ラッパー側では簡潔さを優先
+- date: '2025-11-06'
+  time_utc: '13:10:00'
+  summary: メイン指示をフォーク専用化し、ワーカーへ個別ワークツリー指示を送信
+  details:
+  - メインCodexにはフォーク準備用プレースホルダのみを送信し、実タスクはワーカーへ個別に配信するようOrchestrator.run_cycleを更新
+  - ワーカーごとのワークツリーパスを明示した手順（`pwd`→必要なら`cd`→再度`pwd`）とタスク本文、`/done`ディレクティブを自動生成
+  - Boss rewrite用プロンプトにもワークツリー位置確認のステップを追加
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py -q
+  - uv run pytest
+  result: tests 97 passed
+  notes: メインpaneではファイル変更を行わず、ワーカー側だけが専用ワークツリーで作業する運用を明文化

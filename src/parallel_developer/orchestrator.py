@@ -131,6 +131,10 @@ class Orchestrator:
             main_session_id=main_session_id,
             baseline=baseline,
         )
+        self._dispatch_worker_instructions(
+            layout=layout,
+            user_instruction=instruction,
+        )
         self._active_worker_sessions = [session_id for session_id in fork_map.values() if session_id]
         completion_info = self._await_worker_completion(fork_map)
 
@@ -323,10 +327,11 @@ class Orchestrator:
 
         user_instruction = instruction.rstrip()
         formatted_instruction = self._ensure_done_directive(user_instruction)
+        fork_prompt = self._build_main_fork_prompt()
 
         self._tmux.send_instruction_to_pane(
             pane_id=layout.main_pane,
-            instruction=formatted_instruction,
+            instruction=fork_prompt,
         )
         self._monitor.wait_for_rollout_activity(
             main_session_id,
@@ -335,7 +340,7 @@ class Orchestrator:
         self._tmux.interrupt_pane(pane_id=layout.main_pane)
         self._monitor.capture_instruction(
             pane_id=layout.main_pane,
-            instruction=formatted_instruction,
+            instruction=fork_prompt,
         )
         return main_session_id, formatted_instruction
 
@@ -365,6 +370,30 @@ class Orchestrator:
             baseline=baseline,
         )
         return fork_map
+
+    def _dispatch_worker_instructions(
+        self,
+        *,
+        layout: CycleLayout,
+        user_instruction: str,
+    ) -> None:
+        for pane_id in layout.worker_panes:
+            worker_name = layout.pane_to_worker[pane_id]
+            worker_path = layout.pane_to_path.get(pane_id)
+            if worker_path is None:
+                continue
+            location_notice = self._worktree_location_notice(custom_path=worker_path)
+            base_message = (
+                f"You are {worker_name}. Your dedicated worktree is `{worker_path}`.\n"
+                "Do not respond with `/done` until you finish the task below.\n\n"
+                "Task:\n"
+                f"{user_instruction.rstrip()}"
+            )
+            message = self._ensure_done_directive(base_message, location_notice=location_notice)
+            self._tmux.send_instruction_to_pane(
+                pane_id=pane_id,
+                instruction=message,
+            )
 
     def _await_worker_completion(self, fork_map: Mapping[str, str]) -> Dict[str, Any]:
         completion_info = self._monitor.await_completion(
@@ -518,19 +547,17 @@ class Orchestrator:
                 f"{len(workers)} workers but {self._worker_count} expected"
             )
 
-    def _ensure_done_directive(self, instruction: str) -> str:
+    def _ensure_done_directive(self, instruction: str, *, location_notice: Optional[str] = None) -> str:
         directive = "\n\nWhen you have completed the requested work, respond with exactly `/done`."
-        safety_phrase = "Do not `cd` outside this directory; keep every edit within this worktree."
-        safety_notice = self._worktree_location_notice()
+        notice = location_notice or self._worktree_location_notice()
 
         parts = [instruction.rstrip()]
-        if safety_phrase not in instruction:
-            parts.append(safety_notice.rstrip())
+        if notice and notice.strip() not in instruction:
+            parts.append(notice.rstrip())
         if directive.strip() not in instruction:
             parts.append(directive)
 
-        result = "".join(parts)
-        return result
+        return "".join(parts)
 
     def _auto_or_select(
         self,
@@ -646,12 +673,18 @@ class Orchestrator:
             return f"{base}/{role}"
         return base
 
-    def _worktree_location_notice(self, role: Optional[str] = None) -> str:
-        hint = self._worktree_location_hint(role)
+    def _worktree_location_notice(self, role: Optional[str] = None, custom_path: Optional[Path] = None) -> str:
+        hint = str(custom_path) if custom_path is not None else self._worktree_location_hint(role)
+        target_path = str(custom_path) if custom_path is not None else hint
         return (
-            "\n\nBefore you make any edits, run `pwd` and confirm that you are inside the dedicated worktree "
-            f"(the path should contain `{hint}`). Do not `cd` outside this directory; keep every edit within this worktree.\n"
+            "\n\nBefore you make any edits:\n"
+            f"1. Run `pwd`. If the path does not contain `{hint}`, run `cd {target_path}`.\n"
+            "2. Run `pwd` again to confirm you are now in the correct worktree.\n"
+            "Keep every edit within this worktree and do not `cd` outside it.\n"
         )
+
+    def _build_main_fork_prompt(self) -> str:
+        return "Fork"
 
     def _build_boss_instruction(
         self,
@@ -673,7 +706,7 @@ class Orchestrator:
             "Output only the JSON object for the evaluation.\n"
         )
         if self._boss_mode == BossMode.REWRITE:
-            safety = self._worktree_location_notice(role="boss").strip()
+            safety = self._worktree_location_notice(custom_path=self._worktree.boss_path).strip()
             return (
                 "Boss evaluation and rewrite phase:\n"
                 f"{base}"

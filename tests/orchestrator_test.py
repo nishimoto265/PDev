@@ -120,9 +120,10 @@ def test_orchestrator_runs_happy_path(dependencies):
     monitor.register_new_rollout.assert_any_call(
         pane_id="pane-boss", baseline={Path("/rollout-main"): 1.0}
     )
-    main_call = tmux.send_instruction_to_pane.call_args_list[0]
+    send_calls = tmux.send_instruction_to_pane.call_args_list
+    main_call = send_calls[0]
     assert main_call.kwargs["pane_id"] == "pane-main"
-    assert "/done" in main_call.kwargs["instruction"]
+    assert main_call.kwargs["instruction"] == "Fork"
     monitor.wait_for_rollout_activity.assert_called_once_with("session-main", timeout_seconds=10.0)
     tmux.interrupt_pane.assert_called_once_with(pane_id="pane-main")
     monitor.capture_instruction.assert_called_once_with(
@@ -139,6 +140,16 @@ def test_orchestrator_runs_happy_path(dependencies):
         base_session_id="session-main",
         pane_paths=expected_worker_paths,
     )
+    worker_calls = send_calls[1:4]
+    assert len(worker_calls) == 3
+    for idx, call in enumerate(worker_calls, start=1):
+        assert call.kwargs["pane_id"] == f"pane-worker-{idx}"
+        message = call.kwargs["instruction"]
+        worker_path = expected_worker_paths[f"pane-worker-{idx}"]
+        assert str(worker_path) in message
+        assert "Run `pwd`" in message
+        assert dependencies["instruction"] in message
+        assert "/done" in message
     monitor.register_worker_rollouts.assert_called_once()
     tmux.fork_boss.assert_called_once_with(
         pane_id="pane-boss",
@@ -151,7 +162,7 @@ def test_orchestrator_runs_happy_path(dependencies):
         "baseline": {Path("/rollout-main"): 1.0},
     }
     tmux.prepare_for_instruction.assert_called_once_with(pane_id="pane-boss")
-    boss_instruction_call = tmux.send_instruction_to_pane.call_args_list[-1]
+    boss_instruction_call = send_calls[-1]
     assert boss_instruction_call.kwargs["pane_id"] == "pane-boss"
     assert "score" in boss_instruction_call.kwargs["instruction"]
     assert "worker-1" in boss_instruction_call.kwargs["instruction"]
@@ -265,7 +276,7 @@ def test_ensure_done_directive_always_appends(dependencies):
     instruction = "作業して完了したら /done"
     ensured = orchestrator._ensure_done_directive(instruction)
     assert "When you have completed the requested work" in ensured
-    assert "run `pwd`" in ensured
+    assert "Run `pwd`" in ensured
     assert ensured.endswith("`/done`.")
     ensured_again = orchestrator._ensure_done_directive(ensured)
     assert ensured_again == ensured
@@ -321,7 +332,7 @@ def test_boss_instruction_rewrite_mode():
     text = orchestrator._build_boss_instruction(["worker-1", "worker-2"], "Implement feature X")
     assert "For each candidate" in text
     assert "After you emit the JSON scoreboard" in text
-    assert "run `pwd`" in text
+    assert "Run `pwd`" in text
     assert "respond with /done" in text.lower()
 
 
