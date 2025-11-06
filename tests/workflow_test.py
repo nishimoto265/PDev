@@ -4,8 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from parallel_developer.controller import CLIController
-from parallel_developer.orchestrator import OrchestrationResult
+from parallel_developer.controller import CLIController, FlowMode
+from parallel_developer.orchestrator import CandidateInfo, CycleLayout, OrchestrationResult, BossMode
 from parallel_developer.session_manifest import ManifestStore
 
 
@@ -201,3 +201,60 @@ def test_first_cycle_cancel_keeps_current_session(base_controller):
 
     _run(controller._workflow.run_instruction("second run"))
     assert resume_ids[1] == "session-new"
+
+
+def test_flow_auto_review_skips_worker_prompt(base_controller):
+    controller, events = base_controller
+    controller._flow_mode = FlowMode.AUTO_REVIEW
+    controller._config.flow_mode = FlowMode.AUTO_REVIEW
+    events.clear()
+    layout = CycleLayout(
+        main_pane="%0",
+        boss_pane="%1",
+        worker_panes=[],
+        worker_names=[],
+        pane_to_worker={},
+        pane_to_path={},
+    )
+    should_continue = controller._handle_worker_decision({}, {}, layout)
+    assert should_continue is False
+    assert any("flow auto review" in payload.get("text", "").lower() for event, payload in events if event == "log")
+
+
+def test_flow_auto_select_picks_highest_score(base_controller, tmp_path):
+    controller, events = base_controller
+    controller._flow_mode = FlowMode.AUTO_SELECT
+    controller._config.flow_mode = FlowMode.AUTO_SELECT
+    controller._config.boss_mode = BossMode.SCORE
+    events.clear()
+    candidates = [
+        CandidateInfo(key="worker-1", label="worker-1", session_id="session-1", branch="branch-1", worktree=tmp_path / "w1"),
+        CandidateInfo(key="worker-2", label="worker-2", session_id="session-2", branch="branch-2", worktree=tmp_path / "w2"),
+    ]
+    scoreboard = {
+        "worker-1": {"score": 70, "comment": "ok"},
+        "worker-2": {"score": 90, "comment": "best"},
+    }
+    decision = controller._select_candidates(candidates, scoreboard)
+    assert decision.selected_key == "worker-2"
+    assert any("flow auto_select" in payload.get("text", "").lower() for event, payload in events if event == "log")
+    assert controller._selection_context is None
+
+
+def test_flow_full_auto_prefers_boss_on_rewrite(base_controller, tmp_path):
+    controller, events = base_controller
+    controller._flow_mode = FlowMode.FULL_AUTO
+    controller._config.flow_mode = FlowMode.FULL_AUTO
+    controller._config.boss_mode = BossMode.REWRITE
+    events.clear()
+    candidates = [
+        CandidateInfo(key="worker-1", label="worker-1", session_id="session-1", branch="branch-1", worktree=tmp_path / "w1"),
+        CandidateInfo(key="boss", label="boss", session_id="boss-session", branch="branch-boss", worktree=tmp_path / "boss"),
+    ]
+    scoreboard = {
+        "worker-1": {"score": 95, "comment": "great"},
+        "boss": {"comment": "rewrite ready"},
+    }
+    decision = controller._select_candidates(candidates, scoreboard)
+    assert decision.selected_key == "boss"
+    assert any("flow full_auto" in payload.get("text", "").lower() for event, payload in events if event == "log")

@@ -57,8 +57,7 @@ class WorkflowManager:
         loop = asyncio.get_running_loop()
 
         def selector(candidates: List[CandidateInfo], scoreboard: Optional[Dict[str, Dict[str, object]]] = None) -> SelectionDecision:
-            future = c._request_selection(candidates, scoreboard)
-            return future.result()
+            return c._select_candidates(candidates, scoreboard)
 
         resume_session = c._last_selected_session
 

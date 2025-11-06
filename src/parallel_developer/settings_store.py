@@ -12,6 +12,7 @@ from typing import Dict, Optional
 class SettingsData:
     attach_mode: str = "auto"
     boss_mode: str = "score"
+    flow_mode: str = "manual"
 
 
 class SettingsStore:
@@ -40,17 +41,29 @@ class SettingsStore:
         self._data.boss_mode = value
         self._save()
 
+    @property
+    def flow_mode(self) -> str:
+        return self._data.flow_mode
+
+    @flow_mode.setter
+    def flow_mode(self, value: str) -> None:
+        self._data.flow_mode = value
+        self._save()
+
     def snapshot(self) -> Dict[str, str]:
         return {
             "attach_mode": self._data.attach_mode,
             "boss_mode": self._data.boss_mode,
+            "flow_mode": self._data.flow_mode,
         }
 
-    def update(self, *, attach_mode: Optional[str] = None, boss_mode: Optional[str] = None) -> None:
+    def update(self, *, attach_mode: Optional[str] = None, boss_mode: Optional[str] = None, flow_mode: Optional[str] = None) -> None:
         if attach_mode is not None:
             self._data.attach_mode = attach_mode
         if boss_mode is not None:
             self._data.boss_mode = boss_mode
+        if flow_mode is not None:
+            self._data.flow_mode = flow_mode
         self._save()
 
     def _load(self) -> SettingsData:
@@ -63,6 +76,7 @@ class SettingsStore:
         return SettingsData(
             attach_mode=str(payload.get("attach_mode", "auto")),
             boss_mode=str(payload.get("boss_mode", "score")),
+            flow_mode=str(payload.get("flow_mode", "manual")),
         )
 
     def _save(self) -> None:

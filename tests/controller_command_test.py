@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from parallel_developer.controller import CLIController
+from parallel_developer.controller import CLIController, FlowMode
 from parallel_developer.orchestrator import BossMode, OrchestrationResult
 from parallel_developer.session_manifest import PaneRecord, SessionManifest, SessionReference
 
@@ -197,3 +197,20 @@ def test_resume_invalid_selection(controller, event_recorder):
     controller._resume_options = []
     _run(controller.execute_command("/resume", 1))
     assert any("先に /resume" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_flow_command_updates_mode(controller, event_recorder):
+    events, _ = event_recorder
+    _run(controller.execute_command("/flow"))
+    assert any("フローモード" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    _run(controller.execute_command("/flow", "auto_select"))
+    assert controller._flow_mode == FlowMode.AUTO_SELECT
+    assert controller._config.flow_mode == FlowMode.AUTO_SELECT
+    assert controller._settings_store.flow_mode == FlowMode.AUTO_SELECT.value
+    assert any("フローモードを" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    _run(controller.execute_command("/flow", "invalid"))
+    assert any("使い方" in payload.get("text", "") for event, payload in events if event == "log")

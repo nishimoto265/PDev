@@ -40,9 +40,17 @@ class ControllerEvent(Message):
 
 class StatusPanel(Static):
     def update_status(self, config: "SessionConfig", message: str) -> None:
+        flow_value = getattr(config, "flow_mode", None)
+        if hasattr(flow_value, "value"):
+            flow_text = flow_value.value  # type: ignore[attr-defined]
+        elif flow_value is not None:
+            flow_text = str(flow_value)
+        else:
+            flow_text = "manual"
         lines = [
             f"tmux session : {config.tmux_session}",
             f"mode         : {config.mode.value}",
+            f"flow         : {flow_text}",
             f"workers      : {config.worker_count}",
             f"logs root    : {config.logs_root}",
             f"status       : {message}",
@@ -181,7 +189,7 @@ class CommandHint(Static):
         if paused:
             suffix = " | [orange1]一時停止モード: ESCで巻き戻し、入力はワーカーへ送信[/]"
         self.update(
-            "Commands : /attach, /parallel, /mode, /resume, /log, /status, /scoreboard, /done, /help, /exit | ESC: 一時停止/巻き戻し"
+            "Commands : /attach, /parallel, /mode, /flow, /resume, /log, /status, /scoreboard, /done, /help, /exit | ESC: 一時停止/巻き戻し"
             + suffix
         )
 

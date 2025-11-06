@@ -28,6 +28,21 @@ class SessionMode(str, Enum):
     MAIN = "main"
 
 
+class FlowMode(str, Enum):
+    MANUAL = "manual"
+    AUTO_REVIEW = "auto_review"
+    AUTO_SELECT = "auto_select"
+    FULL_AUTO = "full_auto"
+
+
+FLOW_MODE_LABELS = {
+    FlowMode.MANUAL: "Manual",
+    FlowMode.AUTO_REVIEW: "Auto Review",
+    FlowMode.AUTO_SELECT: "Auto Select",
+    FlowMode.FULL_AUTO: "Full Auto",
+}
+
+
 class TmuxAttachManager:
     """Launch an external terminal to attach to the tmux session."""
 
@@ -126,6 +141,7 @@ class SessionConfig:
     mode: SessionMode
     logs_root: Path
     boss_mode: BossMode = BossMode.SCORE
+    flow_mode: FlowMode = FlowMode.MANUAL
     reuse_existing_session: bool = False
 
 @dataclass
@@ -199,6 +215,12 @@ class CLIController:
             self._config.boss_mode = BossMode(saved_boss_mode)
         except ValueError:
             self._config.boss_mode = BossMode.SCORE
+        saved_flow_mode = self._settings_store.flow_mode
+        try:
+            self._flow_mode = FlowMode(saved_flow_mode)
+        except ValueError:
+            self._flow_mode = FlowMode.MANUAL
+        self._config.flow_mode = self._flow_mode
         self._session_namespace: str = self._config.session_id
         self._last_started_main_session_id: Optional[str] = None
         self._pre_cycle_selected_session: Optional[str] = None
@@ -291,6 +313,16 @@ class CLIController:
                     CommandOption("skip", "skip"),
                     CommandOption("score", "score"),
                     CommandOption("rewrite", "rewrite"),
+                ],
+            ),
+            "/flow": CommandSpecEntry(
+                "ワークフローモードを切り替える",
+                self._cmd_flow,
+                options=[
+                    CommandOption("Manual", FlowMode.MANUAL.value),
+                    CommandOption("Auto Review", FlowMode.AUTO_REVIEW.value),
+                    CommandOption("Auto Select", FlowMode.AUTO_SELECT.value),
+                    CommandOption("Full Auto", FlowMode.FULL_AUTO.value),
                 ],
             ),
             "/parallel": CommandSpecEntry(
@@ -409,6 +441,37 @@ class CLIController:
         self._config.boss_mode = new_mode
         self._settings_store.boss_mode = new_mode.value
         self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
+
+    async def _cmd_flow(self, option: Optional[object]) -> None:
+        if option is None:
+            lines = [
+                f"現在のフローモード: {self._flow_mode_display()}",
+                "利用可能なモード:",
+            ]
+            for mode in FlowMode:
+                lines.append(f"  {mode.value:12s} : {self._flow_mode_display(mode)}")
+            lines.append("使い方: /flow [manual|auto_review|auto_select|full_auto]")
+            self._emit("log", {"text": "\n".join(lines)})
+            return
+
+        token = str(option).strip().lower().replace("-", "_")
+        mapping = {mode.value: mode for mode in FlowMode}
+        new_mode = mapping.get(token)
+        if new_mode is None:
+            self._emit(
+                "log",
+                {"text": "使い方: /flow [manual|auto_review|auto_select|full_auto]"},
+            )
+            return
+        if new_mode == getattr(self, "_flow_mode", FlowMode.MANUAL):
+            self._emit("log", {"text": f"フローモードは既に {self._flow_mode_display(new_mode)} です。"})
+            return
+
+        self._flow_mode = new_mode
+        self._config.flow_mode = new_mode
+        self._settings_store.flow_mode = new_mode.value
+        self._emit("log", {"text": f"フローモードを {self._flow_mode_display(new_mode)} に設定しました。"})
+        self._emit_status("待機中")
 
     async def _cmd_attach(self, option: Optional[object]) -> None:
         mode = str(option).lower() if option is not None else None
@@ -600,6 +663,14 @@ class CLIController:
         completion_info: Mapping[str, Any],
         layout: CycleLayout,
     ) -> bool:
+        if getattr(self, "_flow_mode", FlowMode.MANUAL) in {FlowMode.AUTO_REVIEW, FlowMode.FULL_AUTO}:
+            self._emit(
+                "log",
+                {
+                    "text": f"[flow {self._flow_mode_display()}] ワーカーの処理が完了しました。採点フェーズへ進みます。",
+                },
+            )
+            return False
         future = Future()
         self._continue_future = future
         self._emit(
@@ -644,6 +715,81 @@ class CLIController:
             },
         )
         return future
+
+    def _select_candidates(
+        self,
+        candidates: List[CandidateInfo],
+        scoreboard: Optional[Dict[str, Dict[str, object]]] = None,
+    ) -> SelectionDecision:
+        mode = getattr(self, "_flow_mode", FlowMode.MANUAL)
+        if mode in {FlowMode.MANUAL, FlowMode.AUTO_REVIEW}:
+            future = self._request_selection(candidates, scoreboard)
+            return future.result()
+
+        decision = self._auto_select_decision(candidates, scoreboard or {})
+        if decision is None:
+            future = self._request_selection(candidates, scoreboard)
+            return future.result()
+
+        candidate_map = {candidate.key: candidate for candidate in candidates}
+        selected_candidate = candidate_map.get(decision.selected_key)
+        label = selected_candidate.label if selected_candidate else decision.selected_key
+        self._emit(
+            "log",
+            {
+                "text": f"[flow {mode.value}] {label} を自動選択しました。",
+            },
+        )
+        return decision
+
+    def _auto_select_decision(
+        self,
+        candidates: List[CandidateInfo],
+        scoreboard: Dict[str, Dict[str, object]],
+    ) -> Optional[SelectionDecision]:
+        boss_mode = self._config.boss_mode
+        if boss_mode == BossMode.SKIP:
+            return None
+
+        candidate_map = {candidate.key: candidate for candidate in candidates}
+
+        def score_from_entry(entry: Dict[str, object]) -> Optional[float]:
+            score = entry.get("score")
+            if score is None:
+                return None
+            try:
+                return float(score)
+            except (TypeError, ValueError):
+                return None
+
+        selected_key: Optional[str]
+        if boss_mode == BossMode.REWRITE and "boss" in candidate_map:
+            selected_key = "boss"
+        else:
+            selected_key = None
+            best_score: Optional[float] = None
+            for candidate in candidates:
+                entry = scoreboard.get(candidate.key, {})
+                score_value = score_from_entry(entry)
+                if score_value is None:
+                    continue
+                if best_score is None or score_value > best_score:
+                    best_score = score_value
+                    selected_key = candidate.key
+            if selected_key is None:
+                return None
+
+        scores: Dict[str, float] = {}
+        comments: Dict[str, str] = {}
+        for candidate in candidates:
+            entry = scoreboard.get(candidate.key, {})
+            score_value = score_from_entry(entry)
+            scores[candidate.key] = score_value if score_value is not None else 0.0
+            comment_value = entry.get("comment")
+            if isinstance(comment_value, str) and comment_value:
+                comments[candidate.key] = comment_value
+
+        return SelectionDecision(selected_key=selected_key, scores=scores, comments=comments)
 
     def history_previous(self) -> Optional[str]:
         if not self._input_history:
@@ -955,6 +1101,12 @@ class CLIController:
     def _emit(self, event_type: str, payload: Dict[str, object]) -> None:
         self._event_handler(event_type, payload)
 
+    def _flow_mode_display(self, mode: Optional[FlowMode] = None) -> str:
+        current = mode or getattr(self, "_flow_mode", FlowMode.MANUAL)
+        if isinstance(current, FlowMode):
+            return FLOW_MODE_LABELS.get(current, current.value)
+        return str(current)
+
     def _create_initial_config(self) -> SessionConfig:
         session_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + datetime.utcnow().strftime("%f")[:6]
         tmux_session = f"parallel-dev-{session_id}"
@@ -967,6 +1119,7 @@ class CLIController:
             mode=SessionMode.PARALLEL,
             logs_root=logs_root,
             boss_mode=BossMode.SCORE,
+            flow_mode=FlowMode.MANUAL,
         )
 
     def _create_cycle_logs_dir(self) -> Path:
