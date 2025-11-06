@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -26,7 +25,6 @@ class SettingsStore:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._legacy_json = self._path.with_suffix(".json") if self._path.suffix in {".yaml", ".yml"} else None
         self._data: SettingsData = self._load()
 
     @property
@@ -126,11 +124,6 @@ class SettingsStore:
                 payload = yaml.safe_load(self._path.read_text(encoding="utf-8")) or {}
             except yaml.YAMLError:
                 payload = {}
-        elif self._legacy_json and self._legacy_json.exists():
-            try:
-                payload = json.loads(self._legacy_json.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                payload = {}
         else:
             payload = {}
 
@@ -146,7 +139,7 @@ class SettingsStore:
                 commit=str(commands.get("commit", "manual")),
             )
 
-        # Legacy keys (JSON/YAML) fallback
+        # Legacy YAML keys fallback
         return SettingsData(
             attach=str(payload.get("attach_mode", "auto")),
             boss=str(payload.get("boss_mode", "score")),
