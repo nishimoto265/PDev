@@ -372,3 +372,15 @@
   - uv run pytest
   result: tests 86 passed
   notes: Mappingベースの競合回避を追加検証するため、並列起動シナリオの実機テストを後続タスクとして残す
+- date: '2025-11-06'
+  time_utc: '02:33:00'
+  summary: CLIパネルの縦方向リサイズ優先度をTTDで調整
+  details:
+  - TextualのUIテストに`test_status_log_command_height_config`と`test_status_then_log_shrink_before_command`を追加し、縮小順序の期待を先に明文化
+  - CLIのCSSへ`#panel-stack`コンテナとstatus/logの`1fr`割り当てを導入し、`status→log→入力欄`の順で高さが減るようにレイアウトを再構成
+  - `ParallelDeveloperApp`のcomposeツリーを更新してstatus/logを専用スタックにまとめ、挙動を確認するため全pytestを再実行
+  reproduce:
+  - uv run pytest tests/25-11-02-22_pdev_ui_test.py -k shrink -q
+  - uv run pytest
+  result: tests 92 passed
+  notes: 極端に狭い高さではstatusが最小化されるが、要求どおりの優先度で縮小していることを確認

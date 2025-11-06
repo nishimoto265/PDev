@@ -46,13 +46,21 @@ class ParallelDeveloperApp(App):
         layout: vertical;
         height: 1fr;
         padding: 1 2;
+        min-height: 0;
+    }
+
+    #panel-stack {
+        layout: vertical;
+        height: 1fr;
+        min-height: 0;
     }
 
     #log {
-        height: 1fr;
+        height: 2fr;
         border: round $success;
         margin-bottom: 1;
         overflow-x: hidden;
+        min-height: 3;
     }
 
     #log.paused {
@@ -62,6 +70,8 @@ class ParallelDeveloperApp(App):
     #status {
         border: round $success;
         padding: 1;
+        height: 1fr;
+        min-height: 1;
     }
 
     #status.paused {
@@ -132,33 +142,33 @@ class ParallelDeveloperApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Container(id="body"):
-            with Vertical():
+            with Vertical(id="panel-stack"):
                 self.status_panel = StatusPanel(id="status")
                 yield self.status_panel
                 self.log_panel = EventLog(id="log", max_lines=400)
                 yield self.log_panel
-                self.selection_list = OptionList(id="selection")
-                self.selection_list._allow_focus = True
-                self.selection_list.display = False
-                yield self.selection_list
-                self.command_palette = CommandPalette(id="command-palette")
-                self.command_palette.display = False
-                yield self.command_palette
-                hint = CommandHint(id="hint")
-                hint.update_hint(False)
-                self.command_hint = hint
-                yield hint
-                self.command_input = CommandTextArea(
-                    text="",
-                    placeholder=self._default_placeholder,
-                    id="command",
-                    soft_wrap=True,
-                    tab_behavior="focus",
-                    show_line_numbers=False,
-                    highlight_cursor_line=False,
-                    compact=True,
-                )
-                yield self.command_input
+            self.selection_list = OptionList(id="selection")
+            self.selection_list._allow_focus = True
+            self.selection_list.display = False
+            yield self.selection_list
+            self.command_palette = CommandPalette(id="command-palette")
+            self.command_palette.display = False
+            yield self.command_palette
+            hint = CommandHint(id="hint")
+            hint.update_hint(False)
+            self.command_hint = hint
+            yield hint
+            self.command_input = CommandTextArea(
+                text="",
+                placeholder=self._default_placeholder,
+                id="command",
+                soft_wrap=True,
+                tab_behavior="focus",
+                show_line_numbers=False,
+                highlight_cursor_line=False,
+                compact=True,
+            )
+            yield self.command_input
         yield Footer()
 
     async def on_mount(self) -> None:

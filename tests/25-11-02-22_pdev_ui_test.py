@@ -1,6 +1,7 @@
 import pytest
 
 from textual import events
+from textual.css.scalar import Unit
 from textual.widgets import OptionList
 
 from parallel_developer.cli import ParallelDeveloperApp
@@ -398,3 +399,48 @@ async def test_ctrl_enter_submits_instruction() -> None:
             assert submitted == ["message"]
         finally:
             app._submit_command_input = original_submit  # type: ignore[assignment]
+
+
+@pytest.mark.asyncio
+async def test_status_log_command_height_config() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        status = app.query_one("#status")
+        log = app.query_one("#log")
+        command = app.query_one("#command")
+        assert status.styles.height.unit is Unit.FRACTION
+        assert status.styles.min_height is not None
+        assert status.styles.min_height.value == pytest.approx(1.0)
+        assert log.styles.height.unit is Unit.FRACTION
+        assert log.styles.min_height is not None
+        assert log.styles.min_height.value >= 3.0
+        assert command.styles.height.unit is Unit.AUTO
+        assert command.styles.min_height is not None
+        assert command.styles.min_height.value >= log.styles.min_height.value
+
+
+@pytest.mark.asyncio
+async def test_status_then_log_shrink_before_command() -> None:
+    app = ParallelDeveloperApp()
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        status = app.query_one("#status")
+        log = app.query_one("#log")
+        command = app.query_one("#command")
+
+        await pilot.resize_terminal(100, 40)
+        await pilot.pause()
+        large = (status.size.height, log.size.height, command.size.height)
+
+        await pilot.resize_terminal(100, 22)
+        await pilot.pause()
+        medium = (status.size.height, log.size.height, command.size.height)
+
+        await pilot.resize_terminal(100, 14)
+        await pilot.pause()
+        small = (status.size.height, log.size.height, command.size.height)
+
+        assert medium[0] < large[0]
+        assert medium[2] == large[2]
+        assert small[1] < medium[1]
+        assert small[2] <= medium[2]
