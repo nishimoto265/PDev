@@ -419,3 +419,23 @@
   - uv run python dev_test/25-11-06-15_hello.py
   result: Hello, world!が標準出力に表示される
   notes: 追加ログは未設定、必要に応じてロガーを導入予定
+- date: '2025-11-06'
+  time_utc: '06:13:32'
+  summary: dev_testへEveningスクリプトを追加
+  details:
+  - `dev_test/25-11-06-15_evening.py`を新規作成し、`main`関数からGood eveningを出力する処理を実装
+  - 既存のuv環境を前提にしており、後続のログ詳細化やTTDテスト追加を容易にするため入口関数を分離
+  reproduce:
+  - uv run python dev_test/25-11-06-15_evening.py
+  result: Good eveningが標準出力に表示される
+  notes: ログ出力は未整備、必要に応じてLogger導入を検討
+- date: '2025-11-06'
+  time_utc: '06:13:41'
+  summary: dev_testへEVENINGスクリプトを追加
+  details:
+  - 25-11-06-15_evening.pyを作成し、挨拶メッセージと詳細ログ出力を実装
+  - ログファイルをlogs/25-11-06-15_evening.logへ出力し、開始・準備・完了イベントを記録
+  reproduce:
+  - uv run python dev_test/25-11-06-15_evening.py
+  result: Good evening, world!が標準出力に表示される
+  notes: 既存uv環境を活用、将来のTTDテスト追加に備えmain/run構成を分離
