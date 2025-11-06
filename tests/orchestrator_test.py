@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import List
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -22,6 +22,8 @@ def dependencies():
     worktree.boss_branch = "parallel-dev/session-a/boss"
     worktree.worker_branch.side_effect = lambda name: f"parallel-dev/session-a/{name}"
     monitor = Mock(name="monitor")
+    monitor.consume_session_until_eof = Mock(name="consume_session_until_eof")
+    monitor.bind_existing_session = Mock(name="bind_existing_session")
     logger = Mock(name="log_manager")
 
     worktree.prepare.return_value = {
@@ -183,6 +185,12 @@ def test_orchestrator_runs_happy_path(dependencies):
         session_id="session-boss",
         pane_id="pane-main",
     )
+    assert monitor.bind_existing_session.call_args_list[-1] == call(
+        pane_id="pane-main",
+        session_id="session-boss",
+    )
+    monitor.bind_existing_session.assert_called_with(pane_id="pane-main", session_id="session-boss")
+    assert call("session-boss") in monitor.consume_session_until_eof.call_args_list
     dependencies["logger"].record_cycle.assert_called_once()
     assert result.selected_session == "session-boss"
     assert result.sessions_summary["boss"]["score"] == 80.0
@@ -257,16 +265,17 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
         resume_session_id="session-prev",
     )
 
-    monitor.bind_existing_session.assert_called_once_with(
-        pane_id="pane-main",
-        session_id="session-prev",
-    )
+    assert monitor.bind_existing_session.call_args_list == [
+        call(pane_id="pane-main", session_id="session-prev"),
+        call(pane_id="pane-main", session_id="session-boss"),
+    ]
     tmux.launch_main_session.assert_not_called()
     assert not tmux.resume_session.called
     monitor.register_new_rollout.assert_called_once_with(
         pane_id="pane-boss",
         baseline={Path("/rollout-main"): 1.0},
     )
+    assert monitor.consume_session_until_eof.call_args_list[-1] == call("session-boss")
 
 
 def test_ensure_done_directive_always_appends(dependencies):
@@ -379,7 +388,9 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
 
     orchestrator.run_cycle(dependencies["instruction"], selector=selector)
 
-    monitor.consume_session_until_eof.assert_called_once_with("session-boss")
+    calls = monitor.consume_session_until_eof.call_args_list
+    assert call("session-boss") in calls
+    assert calls[-1] == call("session-worker-1")
     boss_calls = [
         call.kwargs["instruction"]
         for call in tmux.send_instruction_to_pane.call_args_list

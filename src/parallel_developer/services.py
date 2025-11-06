@@ -188,8 +188,8 @@ class TmuxLayoutManager:
             time.sleep(self.backtrack_delay)
 
     def promote_to_main(self, *, session_id: str, pane_id: str) -> None:
-        pane = self._get_pane(pane_id)
-        pane.send_keys(self._codex_command(f"codex resume {shlex.quote(str(session_id))}"), enter=True)
+        command = self._codex_command(f"codex resume {shlex.quote(str(session_id))}")
+        self._send_text(pane_id, command)
 
     def interrupt_pane(self, *, pane_id: str) -> None:
         pane = self._get_pane(pane_id)

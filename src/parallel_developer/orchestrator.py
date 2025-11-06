@@ -522,6 +522,18 @@ class Orchestrator:
             self._worktree.merge_into_main(selected.branch)
         if selected.session_id:
             self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
+            bind_existing = getattr(self._monitor, "bind_existing_session", None)
+            if callable(bind_existing):
+                try:
+                    bind_existing(pane_id=main_pane, session_id=selected.session_id)
+                except Exception:
+                    pass
+            consume = getattr(self._monitor, "consume_session_until_eof", None)
+            if callable(consume):
+                try:
+                    consume(selected.session_id)
+                except Exception:
+                    pass
 
     # --------------------------------------------------------------------- #
     # Existing helper utilities
