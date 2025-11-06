@@ -213,22 +213,25 @@ class CLIController:
         self._attach_manager = TmuxAttachManager()
         settings_path = Path(settings_path) if settings_path else (self._worktree_root / ".parallel-dev" / "settings.yaml")
         self._settings_store = SettingsStore(settings_path)
-        self._attach_mode: str = self._settings_store.attach_mode
-        saved_boss_mode = self._settings_store.boss_mode
+        self._attach_mode: str = self._settings_store.attach
+        saved_boss_mode = self._settings_store.boss
         try:
             self._config.boss_mode = BossMode(saved_boss_mode)
         except ValueError:
             self._config.boss_mode = BossMode.SCORE
-        saved_flow_mode = self._settings_store.flow_mode
+        saved_flow_mode = self._settings_store.flow
         try:
             self._flow_mode = FlowMode(saved_flow_mode)
         except ValueError:
             self._flow_mode = FlowMode.MANUAL
         self._config.flow_mode = self._flow_mode
-        self._auto_commit_enabled: bool = bool(self._settings_store.auto_commit)
-        self._config.worker_count = max(1, int(self._settings_store.worker_count))
+        self._auto_commit_enabled: bool = self._settings_store.commit == "auto"
         try:
-            self._config.mode = SessionMode(self._settings_store.session_mode)
+            self._config.worker_count = max(1, int(self._settings_store.parallel or "3"))
+        except ValueError:
+            self._config.worker_count = 3
+        try:
+            self._config.mode = SessionMode(self._settings_store.mode)
         except ValueError:
             self._config.mode = SessionMode.PARALLEL
         self._session_namespace: str = self._config.session_id
@@ -461,7 +464,7 @@ class CLIController:
             self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
             return
         self._config.boss_mode = new_mode
-        self._settings_store.boss_mode = new_mode.value
+        self._settings_store.boss = new_mode.value
         self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
 
     async def _cmd_flow(self, option: Optional[object]) -> None:
@@ -491,7 +494,7 @@ class CLIController:
 
         self._flow_mode = new_mode
         self._config.flow_mode = new_mode
-        self._settings_store.flow_mode = new_mode.value
+        self._settings_store.flow = new_mode.value
         self._emit("log", {"text": f"フローモードを {self._flow_mode_display(new_mode)} に設定しました。"})
         self._emit_status("待機中")
 
@@ -500,7 +503,7 @@ class CLIController:
         if mode in {"auto", "manual"}:
             self._attach_mode = mode
             self._emit("log", {"text": f"/attach モードを {mode} に設定しました。"})
-            self._settings_store.attach_mode = mode
+            self._settings_store.attach = mode
             return
         if mode == "now" or option is None:
             await self._handle_attach_command(force=True)
@@ -520,7 +523,7 @@ class CLIController:
             self._emit("log", {"text": "ワーカー数は1以上で指定してください。"})
             return
         self._config.worker_count = value
-        self._settings_store.worker_count = value
+        self._settings_store.parallel = str(value)
         self._emit_status("設定を更新しました。")
 
     async def _cmd_mode(self, option: Optional[object]) -> None:
@@ -529,7 +532,7 @@ class CLIController:
             self._emit("log", {"text": "使い方: /mode main | /mode parallel"})
             return
         self._config.mode = SessionMode(mode)
-        self._settings_store.session_mode = mode
+        self._settings_store.mode = mode
         self._emit_status("設定を更新しました。")
 
     async def _cmd_resume(self, option: Optional[object]) -> None:
@@ -585,14 +588,19 @@ class CLIController:
         if option is not None:
             mode = str(option).lower()
         if mode == "manual":
+            self._auto_commit_enabled = False
+            self._settings_store.commit = "manual"
             self._perform_commit(auto=False, quiet_when_no_change=False)
             return
         if mode == "auto":
-            self._auto_commit_enabled = not self._auto_commit_enabled
-            self._settings_store.auto_commit = self._auto_commit_enabled
-            state = "有効" if self._auto_commit_enabled else "無効"
-            self._emit("log", {"text": f"自動コミットを{state}にしました。"})
             if self._auto_commit_enabled:
+                self._auto_commit_enabled = False
+                self._settings_store.commit = "manual"
+                self._emit("log", {"text": "自動コミットを無効にしました。"})
+            else:
+                self._auto_commit_enabled = True
+                self._settings_store.commit = "auto"
+                self._emit("log", {"text": "自動コミットを有効にしました。"})
                 self._perform_commit(auto=True, quiet_when_no_change=True)
             return
         self._emit("log", {"text": "/commit は manual または auto を指定してください。"})

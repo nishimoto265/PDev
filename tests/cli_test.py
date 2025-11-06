@@ -676,7 +676,8 @@ def test_boss_command_updates_mode(monkeypatch, manifest_store, tmp_path):
     _run_async(controller.handle_input("Implement feature"))
     assert captured_kwargs["boss_mode"] == BossMode.REWRITE
     settings_path = tmp_path / ".parallel-dev" / "settings.yaml"
-    assert yaml.safe_load(settings_path.read_text(encoding="utf-8"))["boss_mode"] == "rewrite"
+    data = yaml.safe_load(settings_path.read_text(encoding="utf-8")) or {}
+    assert data.get("commands", {}).get("boss") == "rewrite"
 
 
 def test_boss_command_reports_current_mode(tmp_path, caplog):

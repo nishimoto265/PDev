@@ -12,12 +12,12 @@ import yaml
 
 @dataclass
 class SettingsData:
-    attach_mode: str = "auto"
-    boss_mode: str = "score"
-    flow_mode: str = "manual"
-    auto_commit: bool = False
-    worker_count: int = 3
-    session_mode: str = "parallel"
+    attach: str = "auto"
+    boss: str = "score"
+    flow: str = "manual"
+    parallel: str = "3"
+    mode: str = "parallel"
+    commit: str = "manual"
 
 
 class SettingsStore:
@@ -30,91 +30,93 @@ class SettingsStore:
         self._data: SettingsData = self._load()
 
     @property
-    def attach_mode(self) -> str:
-        return self._data.attach_mode
+    def attach(self) -> str:
+        return self._data.attach
 
-    @attach_mode.setter
-    def attach_mode(self, value: str) -> None:
-        self._data.attach_mode = value
+    @attach.setter
+    def attach(self, value: str) -> None:
+        self._data.attach = value
         self._save()
 
     @property
-    def boss_mode(self) -> str:
-        return self._data.boss_mode
+    def boss(self) -> str:
+        return self._data.boss
 
-    @boss_mode.setter
-    def boss_mode(self, value: str) -> None:
-        self._data.boss_mode = value
+    @boss.setter
+    def boss(self, value: str) -> None:
+        self._data.boss = value
         self._save()
 
     @property
-    def flow_mode(self) -> str:
-        return self._data.flow_mode
+    def flow(self) -> str:
+        return self._data.flow
 
-    @flow_mode.setter
-    def flow_mode(self, value: str) -> None:
-        self._data.flow_mode = value
+    @flow.setter
+    def flow(self, value: str) -> None:
+        self._data.flow = value
         self._save()
 
     @property
-    def auto_commit(self) -> bool:
-        return self._data.auto_commit
+    def parallel(self) -> str:
+        return self._data.parallel
 
-    @auto_commit.setter
-    def auto_commit(self, value: bool) -> None:
-        self._data.auto_commit = value
+    @parallel.setter
+    def parallel(self, value: str) -> None:
+        self._data.parallel = value
         self._save()
 
     @property
-    def worker_count(self) -> int:
-        return self._data.worker_count
+    def mode(self) -> str:
+        return self._data.mode
 
-    @worker_count.setter
-    def worker_count(self, value: int) -> None:
-        self._data.worker_count = value
+    @mode.setter
+    def mode(self, value: str) -> None:
+        self._data.mode = value
         self._save()
 
     @property
-    def session_mode(self) -> str:
-        return self._data.session_mode
+    def commit(self) -> str:
+        return self._data.commit
 
-    @session_mode.setter
-    def session_mode(self, value: str) -> None:
-        self._data.session_mode = value
+    @commit.setter
+    def commit(self, value: str) -> None:
+        self._data.commit = value
         self._save()
 
     def snapshot(self) -> Dict[str, object]:
         return {
-            "attach_mode": self._data.attach_mode,
-            "boss_mode": self._data.boss_mode,
-            "flow_mode": self._data.flow_mode,
-            "auto_commit": self._data.auto_commit,
-            "worker_count": self._data.worker_count,
-            "session_mode": self._data.session_mode,
+            "commands": {
+                "attach": self._data.attach,
+                "boss": self._data.boss,
+                "flow": self._data.flow,
+                "parallel": self._data.parallel,
+                "mode": self._data.mode,
+                "commit": self._data.commit,
+            }
         }
 
     def update(
         self,
         *,
-        attach_mode: Optional[str] = None,
-        boss_mode: Optional[str] = None,
-        flow_mode: Optional[str] = None,
-        auto_commit: Optional[bool] = None,
-        worker_count: Optional[int] = None,
-        session_mode: Optional[str] = None,
+        attach: Optional[str] = None,
+        boss: Optional[str] = None,
+        flow: Optional[str] = None,
+        parallel: Optional[str] = None,
+        mode: Optional[str] = None,
+        commit: Optional[str] = None,
     ) -> None:
-        if attach_mode is not None:
-            self._data.attach_mode = attach_mode
-        if boss_mode is not None:
-            self._data.boss_mode = boss_mode
-        if flow_mode is not None:
-            self._data.flow_mode = flow_mode
-        if auto_commit is not None:
-            self._data.auto_commit = auto_commit
-        if worker_count is not None:
-            self._data.worker_count = worker_count
-        if session_mode is not None:
-            self._data.session_mode = session_mode
+        if attach is not None:
+            self._data.attach = attach
+        if boss is not None:
+            self._data.boss = boss
+        if flow is not None:
+            self._data.flow = flow
+        if parallel is not None:
+            self._data.parallel = parallel
+        if mode is not None:
+            self._data.mode = mode
+        if commit is not None:
+            self._data.commit = commit
         self._save()
 
     def _load(self) -> SettingsData:
@@ -131,13 +133,27 @@ class SettingsStore:
                 payload = {}
         else:
             payload = {}
+
+        commands = payload.get("commands") if isinstance(payload, dict) else None
+
+        if isinstance(commands, dict):
+            return SettingsData(
+                attach=str(commands.get("attach", "auto")),
+                boss=str(commands.get("boss", "score")),
+                flow=str(commands.get("flow", "manual")),
+                parallel=str(commands.get("parallel", "3")),
+                mode=str(commands.get("mode", "parallel")),
+                commit=str(commands.get("commit", "manual")),
+            )
+
+        # Legacy keys (JSON/YAML) fallback
         return SettingsData(
-            attach_mode=str(payload.get("attach_mode", "auto")),
-            boss_mode=str(payload.get("boss_mode", "score")),
-            flow_mode=str(payload.get("flow_mode", "manual")),
-            auto_commit=bool(payload.get("auto_commit", False)),
-            worker_count=int(payload.get("worker_count", 3)),
-            session_mode=str(payload.get("session_mode", "parallel")),
+            attach=str(payload.get("attach_mode", "auto")),
+            boss=str(payload.get("boss_mode", "score")),
+            flow=str(payload.get("flow_mode", "manual")),
+            parallel=str(payload.get("worker_count", "3")),
+            mode=str(payload.get("session_mode", "parallel")),
+            commit="auto" if bool(payload.get("auto_commit", False)) else "manual",
         )
 
     def _save(self) -> None:

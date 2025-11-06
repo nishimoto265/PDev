@@ -208,7 +208,7 @@ def test_flow_command_updates_mode(controller, event_recorder):
     _run(controller.execute_command("/flow", "auto_select"))
     assert controller._flow_mode == FlowMode.AUTO_SELECT
     assert controller._config.flow_mode == FlowMode.AUTO_SELECT
-    assert controller._settings_store.flow_mode == FlowMode.AUTO_SELECT.value
+    assert controller._settings_store.flow == FlowMode.AUTO_SELECT.value
     assert any("フローモードを" in payload.get("text", "") for event, payload in events if event == "log")
 
     events.clear()
