@@ -191,14 +191,15 @@ class TmuxLayoutManager:
         command = self._codex_command(f"codex resume {shlex.quote(str(session_id))}")
         self._send_text(pane_id, command)
 
-    def interrupt_pane(self, *, pane_id: str) -> None:
+    def interrupt_pane(self, *, pane_id: str, double: bool = True) -> None:
         pane = self._get_pane(pane_id)
         pane.send_keys("C-c", enter=False)
-        if self.backtrack_delay > 0:
-            time.sleep(self.backtrack_delay)
-        pane.send_keys("C-c", enter=False)
-        if self.backtrack_delay > 0:
-            time.sleep(self.backtrack_delay)
+        if double:
+            if self.backtrack_delay > 0:
+                time.sleep(self.backtrack_delay)
+            pane.send_keys("C-c", enter=False)
+            if self.backtrack_delay > 0:
+                time.sleep(self.backtrack_delay)
 
     def _get_or_create_session(self, fresh: bool = False):
         session = self._server.find_where({"session_name": self.session_name})

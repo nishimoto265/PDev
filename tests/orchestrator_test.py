@@ -127,7 +127,7 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert main_call.kwargs["pane_id"] == "pane-main"
     assert main_call.kwargs["instruction"] == "Fork"
     monitor.wait_for_rollout_activity.assert_called_once_with("session-main", timeout_seconds=10.0)
-    tmux.interrupt_pane.assert_called_once_with(pane_id="pane-main")
+    tmux.interrupt_pane.assert_called_once_with(pane_id="pane-main", double=False)
     monitor.capture_instruction.assert_called_once_with(
         pane_id="pane-main",
         instruction=main_call.kwargs["instruction"],
