@@ -517,7 +517,7 @@ class Orchestrator:
         selected: CandidateInfo,
         main_pane: str,
     ) -> None:
-        self._tmux.interrupt_pane(pane_id=main_pane, double=False)
+        self._tmux.interrupt_pane(pane_id=main_pane)
         if selected.branch:
             self._worktree.merge_into_main(selected.branch)
         if selected.session_id:
