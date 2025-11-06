@@ -473,3 +473,15 @@
   result: file present
   notes: 25-11-06-15_evening.pyを引き続き参照
 
+
+- date: '2025-11-06'
+  time_utc: '06:39:00'
+  summary: eveningラッパーに詳細ログを追加
+  details:
+  - dev_test/evening.pyを再実装し、wrapper固有のDEBUG/INFOログを出力
+  - importlib実行時の例外を捕捉してRuntimeErrorに昇格させるフェイルファスト挙動を追加
+  - ログ出力をlogs/25-11-06-15_evening_wrapper.logへ記録し、モジュールロード時の状態を追跡
+  reproduce:
+  - uv run python dev_test/evening.py
+  result: Good evening, world!が標準出力に表示され、wrapperログにstart/completeが記録
+  notes: 既存uv環境を継続利用し、TTD本実装は後続タスクで対応予定
