@@ -390,9 +390,12 @@ class ParallelDeveloperApp(App):
         self._show_command_palette(items, mode="command")
 
     def _format_option_label(self, option: CommandOption) -> str:
+        display = getattr(option, "display", None)
+        if display:
+            return display
         description = getattr(option, "description", None)
         if description:
-            return f"{option.label:<10} : {description}"
+            return f"{option.label} - {description}"
         return option.label
 
     def _show_command_palette(self, items: List[PaletteItem], *, mode: str) -> None:

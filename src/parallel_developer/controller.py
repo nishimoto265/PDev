@@ -164,6 +164,7 @@ class CommandOption:
     label: str
     value: object
     description: Optional[str] = None
+    display: Optional[str] = None
 
 
 @dataclass
@@ -311,41 +312,41 @@ class CLIController:
                 "tmux セッションへの接続モードを切り替える、または即座に接続する",
                 self._cmd_attach,
             options=[
-                CommandOption("auto", "auto", "自動でターミナルを開く"),
-                CommandOption("manual", "manual", "コマンド入力で手動接続"),
-                CommandOption("now", "now", "即座にtmux attachを実行"),
+                CommandOption("auto - 自動でターミナルを開く", "auto", "自動でターミナルを開く"),
+                CommandOption("manual - コマンド入力で手動接続", "manual", "コマンド入力で手動接続"),
+                CommandOption("now - 即座にtmux attachを実行", "now", "即座にtmux attachを実行"),
             ],
             ),
             "/boss": CommandSpecEntry(
                 "Boss モードを切り替える",
                 self._cmd_boss,
                 options=[
-                    CommandOption("skip", "skip", "Boss評価をスキップ"),
-                    CommandOption("score", "score", "採点のみ実施"),
-                    CommandOption("rewrite", "rewrite", "採点後にBossが統合実装"),
+                    CommandOption("skip - Boss評価をスキップ", "skip", "Boss評価をスキップ"),
+                    CommandOption("score - 採点のみ実施", "score", "採点のみ実施"),
+                    CommandOption("rewrite - 採点後にBossが統合実装", "rewrite", "採点後にBossが統合実装"),
                 ],
             ),
             "/flow": CommandSpecEntry(
                 "ワークフローモードを切り替える",
                 self._cmd_flow,
                 options=[
-                    CommandOption("Manual", FlowMode.MANUAL.value, "選択や採択を手動で行う"),
-                    CommandOption("Auto Review", FlowMode.AUTO_REVIEW.value, "採点は自動、採択は手動"),
-                    CommandOption("Auto Select", FlowMode.AUTO_SELECT.value, "採点・採択を自動化"),
-                    CommandOption("Full Auto", FlowMode.FULL_AUTO.value, "採点・採択・Boss統合まで自動"),
+                    CommandOption("manual - 選択や採択を手動で行う", FlowMode.MANUAL.value, "選択や採択を手動で行う"),
+                    CommandOption("auto_review - 採点は自動、採択は手動", FlowMode.AUTO_REVIEW.value, "採点は自動、採択は手動"),
+                    CommandOption("auto_select - 採点・採択を自動化", FlowMode.AUTO_SELECT.value, "採点・採択を自動化"),
+                    CommandOption("full_auto - 採点・採択・Boss統合まで自動", FlowMode.FULL_AUTO.value, "採点・採択・Boss統合まで自動"),
                 ],
             ),
             "/parallel": CommandSpecEntry(
                 "ワーカー数を設定する",
                 self._cmd_parallel,
-                options=[CommandOption(str(n), str(n), f"ワーカーを{n}人起動") for n in range(1, 5)],
+                options=[CommandOption(f"{n} - ワーカーを{n}人起動", str(n), f"ワーカーを{n}人起動") for n in range(1, 5)],
             ),
             "/mode": CommandSpecEntry(
                 "実行モードを切り替える",
                 self._cmd_mode,
                 options=[
-                    CommandOption("main", "main", "メインCodexのみ稼働"),
-                    CommandOption("parallel", "parallel", "メイン+ワーカーを起動"),
+                    CommandOption("main - メインCodexのみ稼働", "main", "メインCodexのみ稼働"),
+                    CommandOption("parallel - メイン+ワーカーを起動", "parallel", "メイン+ワーカーを起動"),
                 ],
             ),
             "/resume": CommandSpecEntry(
@@ -361,16 +362,16 @@ class CLIController:
                 "ログをコピーするかファイルへ保存する",
                 self._cmd_log,
                 options=[
-                    CommandOption("copy", "copy", "ログをクリップボードへコピー"),
-                    CommandOption("save", "save", "ログをファイルへ保存"),
+                    CommandOption("copy - ログをクリップボードへコピー", "copy", "ログをクリップボードへコピー"),
+                    CommandOption("save - ログをファイルへ保存", "save", "ログをファイルへ保存"),
                 ],
             ),
             "/commit": CommandSpecEntry(
                 "作業内容をGitコミットする（manual/auto）",
                 self._cmd_commit,
                 options=[
-                    CommandOption("manual", "manual", "現在の変更をその場でコミット"),
-                    CommandOption("auto", "auto", "サイクル開始時に自動コミットをON/OFF"),
+                    CommandOption("manual - 現在の変更をコミット", "manual", "現在の変更をその場でコミット"),
+                    CommandOption("auto - 自動コミットをON/OFF", "auto", "サイクル開始時に自動コミットをON/OFF"),
                 ],
             ),
             "/status": CommandSpecEntry(
