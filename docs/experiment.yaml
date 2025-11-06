@@ -452,15 +452,16 @@
   result: Good evening, world!が標準出力に表示される
   notes: 命名規則両立のため互換レイヤーを追加
 - date: '2025-11-06'
-  time_utc: '06:32:46'
+  time_utc: '06:34:30'
   summary: dev_testへEVENING2スクリプトを追加
   details:
-  - dev_test/25-11-06-15_evening2.pyを新規作成し、TTD前の雛形として配置
-  - 既存のスクリプト命名規則に合わせてYY-MM-DD-HHプレフィックスを付与
+  - dev_test/25-11-06-15_evening2.pyを新規実装し、eveningスクリプトのバリエーションを提供
+  - ログをlogs/25-11-06-15_evening2.logへDEBUG/INFOレベルで記録し、開始・メッセージ準備・完了を追跡
+  - main/runを分離して将来のTTDテスト導入時にも再利用できる構造に整理
   reproduce:
   - uv run python dev_test/25-11-06-15_evening2.py
-  result: (未実装)
-  notes: 実装とテストは今後のTTDサイクルで追加予定
+  result: Good evening again, world!が標準出力に表示される
+  notes: ロガーはハンドラ重複を避けつつ複数回の呼び出しでも再利用できる構成
 - date: '2025-11-06'
   time_utc: '06:33:09'
   summary: dev_test/evening.pyを作成（既存の互換ラッパーを維持）
@@ -471,3 +472,4 @@
   - ls dev_test/evening.py
   result: file present
   notes: 25-11-06-15_evening.pyを引き続き参照
+
