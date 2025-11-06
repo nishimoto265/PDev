@@ -485,3 +485,13 @@
   - uv run python dev_test/evening.py
   result: Good evening, world!が標準出力に表示され、wrapperログにstart/completeが記録
   notes: 既存uv環境を継続利用し、TTD本実装は後続タスクで対応予定
+- date: '2025-11-06'
+  time_utc: '06:50:00'
+  summary: eveningラッパーをworker-1実装へ統合
+  details:
+  - dev_test/evening.pyをworker-1案の互換ラッパーに差し替え、過剰な例外ラップと追加ログを整理
+  - importlib.utilを用いた最小限のロード処理を残し、実装モジュール側の詳細ログを活用
+  reproduce:
+  - uv run python dev_test/evening.py
+  result: Good evening, world!が標準出力に表示される
+  notes: 25-11-06-15_evening.pyのログにより動作追跡が可能であるため、ラッパー側では簡潔さを優先

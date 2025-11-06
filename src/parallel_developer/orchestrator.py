@@ -519,12 +519,18 @@ class Orchestrator:
             )
 
     def _ensure_done_directive(self, instruction: str) -> str:
-        directive = (
-            "\n\nWhen you have completed the requested work, respond with exactly `/done`."
-        )
-        if directive.strip() in instruction:
-            return instruction
-        return instruction.rstrip() + directive
+        directive = "\n\nWhen you have completed the requested work, respond with exactly `/done`."
+        safety_phrase = "Do not `cd` outside this directory; keep every edit within this worktree."
+        safety_notice = self._worktree_location_notice()
+
+        parts = [instruction.rstrip()]
+        if safety_phrase not in instruction:
+            parts.append(safety_notice.rstrip())
+        if directive.strip() not in instruction:
+            parts.append(directive)
+
+        result = "".join(parts)
+        return result
 
     def _auto_or_select(
         self,
@@ -630,6 +636,23 @@ class Orchestrator:
             }
         return metrics
 
+    def _worktree_location_hint(self, role: Optional[str] = None) -> str:
+        namespace = getattr(self._worktree, "session_namespace", None)
+        if namespace:
+            base = f".parallel-dev/sessions/{namespace}/worktrees"
+        else:
+            base = ".parallel-dev/worktrees"
+        if role:
+            return f"{base}/{role}"
+        return base
+
+    def _worktree_location_notice(self, role: Optional[str] = None) -> str:
+        hint = self._worktree_location_hint(role)
+        return (
+            "\n\nBefore you make any edits, run `pwd` and confirm that you are inside the dedicated worktree "
+            f"(the path should contain `{hint}`). Do not `cd` outside this directory; keep every edit within this worktree.\n"
+        )
+
     def _build_boss_instruction(
         self,
         worker_names: Sequence[str],
@@ -650,9 +673,11 @@ class Orchestrator:
             "Output only the JSON object for the evaluation.\n"
         )
         if self._boss_mode == BossMode.REWRITE:
+            safety = self._worktree_location_notice(role="boss").strip()
             return (
                 "Boss evaluation and rewrite phase:\n"
                 f"{base}"
+                f"{safety}\n"
                 "After you emit the JSON scoreboard, stay in this boss workspace and produce the final merged implementation.\n"
                 "Refactor or combine the strongest worker contributions. If one worker result is already ideal, copy it into this boss workspace instead of rewriting from scratch.\n"
                 "When the boss implementation is complete, respond with /done."

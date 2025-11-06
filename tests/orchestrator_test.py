@@ -265,6 +265,7 @@ def test_ensure_done_directive_always_appends(dependencies):
     instruction = "作業して完了したら /done"
     ensured = orchestrator._ensure_done_directive(instruction)
     assert "When you have completed the requested work" in ensured
+    assert "run `pwd`" in ensured
     assert ensured.endswith("`/done`.")
     ensured_again = orchestrator._ensure_done_directive(ensured)
     assert ensured_again == ensured
@@ -320,6 +321,7 @@ def test_boss_instruction_rewrite_mode():
     text = orchestrator._build_boss_instruction(["worker-1", "worker-2"], "Implement feature X")
     assert "For each candidate" in text
     assert "After you emit the JSON scoreboard" in text
+    assert "run `pwd`" in text
     assert "respond with /done" in text.lower()
 
 
