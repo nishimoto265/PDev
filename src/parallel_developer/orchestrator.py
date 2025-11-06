@@ -548,7 +548,7 @@ class Orchestrator:
             )
 
     def _ensure_done_directive(self, instruction: str, *, location_notice: Optional[str] = None) -> str:
-        directive = "\n\nWhen you have completed the requested work, respond with exactly `/done`."
+        directive = "\n\nWhen you have completed the requested task, respond with exactly `/done`."
         notice = location_notice or self._worktree_location_notice()
 
         parts = [instruction.rstrip()]

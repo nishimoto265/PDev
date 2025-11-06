@@ -275,7 +275,7 @@ def test_ensure_done_directive_always_appends(dependencies):
 
     instruction = "作業して完了したら /done"
     ensured = orchestrator._ensure_done_directive(instruction)
-    assert "When you have completed the requested work" in ensured
+    assert "When you have completed the requested task" in ensured
     assert "Run `pwd`" in ensured
     assert ensured.endswith("`/done`.")
     ensured_again = orchestrator._ensure_done_directive(ensured)
