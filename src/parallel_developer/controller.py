@@ -1233,8 +1233,8 @@ def build_orchestrator(
         worker_count=worker_count,
         monitor=monitor,
         root_path=worktree_root,
-        startup_delay=0.5,
-        backtrack_delay=0.3,
+        startup_delay=0.0,
+        backtrack_delay=0.0,
         reuse_existing_session=reuse_existing_session,
         session_namespace=session_namespace,
     )
