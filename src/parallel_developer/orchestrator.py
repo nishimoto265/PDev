@@ -563,7 +563,12 @@ class Orchestrator:
             )
 
     def _ensure_done_directive(self, instruction: str, *, location_notice: Optional[str] = None) -> str:
-        directive = "\n\nWhen you have completed the requested task, respond with exactly `/done`."
+        directive = (
+            "\n\nCompletion protocol:\n"
+            "- After you finish the requested work and share any summary, you MUST send a new line containing only `/done`.\n"
+            "- Do not describe completion in prose or embed `/done` inside a sentence; the standalone `/done` line is mandatory.\n"
+            "Tasks are treated as unfinished until that literal `/done` line is sent."
+        )
         notice = location_notice or self._worktree_location_notice()
 
         parts = [instruction.rstrip()]
