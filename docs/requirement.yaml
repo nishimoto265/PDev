@@ -30,7 +30,7 @@ metadata:
     - "`parallel-dev --instruction \"...\" --workers N` が起動時に指示を受信し、末尾へ完了フラグの作成/削除手順を含むプロトコルを付与する。"
     - "メインCodexは`codex`で起動し、指示送信後にCtrl+C×2で中断して履歴を保持する。"
     - "worker Codexはフォークされた履歴を共有し、Esc×2→Enterで独立セッションへ派生した後にEnterのみを送信する。"
-    - "Boss Codexは全worker完了後にフォークされ、評価JSONを返したのち最終統合作業を終えて完了フラグを `touch` する役割を持つ。"
+    - "Boss Codexは全worker完了後にフォークされ、score/skipモードなら評価JSONを返した時点で完了、rewriteモードのみ追加統合作業を終えて完了フラグを `touch` する。"
     - "CLIごとに一意な`session_id`をnamespaceとして利用し、`.parallel-dev/sessions/<session_id>`配下へワークツリーとCodex用HOMEを隔離する。"
   手順:
     - "CLIがワークツリーを準備：`.parallel-dev/sessions/<session_id>/worktrees/worker-N` と `.../worktrees/boss` を生成し、各worker用・Boss用ブランチを再作成する。"
@@ -39,7 +39,7 @@ metadata:
     - "workerペインで `codex resume <main_session_id>` を実行し、Esc×2→Enterでフォーク後にEnterのみ送信して指示を確定する。"
     - "CodexMonitorが各workerの新セッションIDとrolloutパスを記録し、指定された完了フラグファイルの生成を監視する。"
     - "全workerの完了フラグが立ったら、Bossペインで `codex resume <main_session_id>` → Esc×2→Enter を実行し、評価プロンプトを送る。"
-    - "BossはJSON形式で`scores`を返し、必要に応じて統合作業を行ったうえでBoss用フラグを `touch` する。Monitorが結果を取り込み、LogManagerが`cycles/<timestamp>.yaml`へ書き出す。"
+    - "BossはJSON形式で`scores`を返し、score/skipモードではそこで完了。rewriteモードでは追加統合作業を行い、完了したらBoss用フラグを `touch` する。Monitorが結果を取り込み、LogManagerが`cycles/<timestamp>.yaml`へ書き出す。"
     - "CLIがスコアボードと候補一覧を表示し、ユーザーは採用する案を番号で選択する。"
     - "WorktreeManagerが選択ブランチをfast-forwardマージし、メインペインで`codex resume <採用セッションID>`を送信して次サイクルを整える。"
       - "instruction.log や cycles/*.yaml は `~/.parallel-dev/logs/<session_id>/<cycle_timestamp>/` に保存され、セッション対応表は `~/.parallel-dev/session_maps/<session_id>.yaml` に保存される。"

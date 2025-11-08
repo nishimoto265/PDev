@@ -514,20 +514,20 @@ class Orchestrator:
             "[parallel-dev] All workers reported completion. Inspect boss pane, then press Enter to send boss instructions...",
         )
 
-        completion_flag = None if self._boss_mode == BossMode.REWRITE else boss_flag
         boss_instruction = self._build_boss_instruction(
             layout.worker_names,
             user_instruction,
-            completion_flag=completion_flag,
         )
         self._tmux.send_instruction_to_pane(
             pane_id=layout.boss_pane,
             instruction=boss_instruction,
         )
 
-        boss_metrics: Dict[str, Dict[str, Any]] = {}
+        boss_metrics = self._wait_for_boss_scores(boss_session_id)
+        if not boss_metrics:
+            boss_metrics = self._extract_boss_scores(boss_session_id)
+
         if self._boss_mode == BossMode.REWRITE:
-            boss_metrics = self._wait_for_boss_scores(boss_session_id)
             followup = self._build_boss_rewrite_followup(boss_flag=boss_flag)
             if followup:
                 self._tmux.prepare_for_instruction(pane_id=layout.boss_pane)
@@ -535,13 +535,14 @@ class Orchestrator:
                     pane_id=layout.boss_pane,
                     instruction=followup,
                 )
-        boss_completion = self._monitor.await_completion(
-            session_ids=[boss_session_id],
-            signal_paths={boss_session_id: boss_flag},
-        )
-        completion_info.update(boss_completion)
-        if not boss_metrics:
-            boss_metrics = self._extract_boss_scores(boss_session_id)
+            boss_completion = self._monitor.await_completion(
+                session_ids=[boss_session_id],
+                signal_paths={boss_session_id: boss_flag},
+            )
+            completion_info.update(boss_completion)
+        else:
+            completion_info[boss_session_id] = {"done": True, "scores_detected": True}
+
         return boss_session_id, boss_metrics
 
     # --------------------------------------------------------------------- #
@@ -768,14 +769,44 @@ class Orchestrator:
             return {}
 
         def _parse_json_from(raw_text: str) -> Optional[Dict[str, Any]]:
-            lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-            for line in lines:
-                if line == "/done":
-                    continue
+            # Try a direct parse first (handles single-line JSON responses).
+            cleaned = raw_text.strip()
+            if cleaned and cleaned != "/done":
                 try:
-                    return json.loads(line)
+                    return json.loads(cleaned)
                 except json.JSONDecodeError:
-                    continue
+                    pass
+
+            def _sanitize(line: str) -> str:
+                stripped = line.strip()
+                if stripped.startswith("• "):
+                    return stripped[2:]
+                if stripped.startswith(('-', '*')) and len(stripped) > 1 and stripped[1] == ' ':
+                    return stripped[2:]
+                return stripped
+
+            lines = [_sanitize(line) for line in raw_text.splitlines() if line.strip() and line.strip() != "/done"]
+            buffer: List[str] = []
+            depth = 0
+            capturing = False
+            for line in lines:
+                if not capturing:
+                    if line.startswith('{'):
+                        capturing = True
+                        depth = 0
+                        buffer = []
+                    else:
+                        continue
+                buffer.append(line)
+                depth += line.count('{') - line.count('}')
+                if depth <= 0:
+                    candidate = "\n".join(buffer)
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        capturing = False
+                        buffer = []
+                        continue
             return None
 
         data = _parse_json_from(raw)
@@ -838,8 +869,6 @@ class Orchestrator:
         self,
         worker_names: Sequence[str],
         user_instruction: str,
-        *,
-        completion_flag: Optional[Path] = None,
     ) -> str:
         worker_paths: Dict[str, Path] = getattr(self._worktree, "_worker_paths", {})
         worker_lines: List[str] = []
@@ -877,15 +906,7 @@ class Orchestrator:
                 "After you emit the JSON scoreboard, wait for the follow-up instructions to perform the final integration."
             )
         else:
-            instruction += "After the JSON response, follow the completion protocol to signal the host."
-
-        if completion_flag is not None:
-            notice = self._worktree_location_notice(role="boss", custom_path=self._worktree.boss_path)
-            return self._ensure_done_directive(
-                instruction,
-                location_notice=notice,
-                completion_flag=completion_flag,
-            )
+            instruction += "After the JSON response, stop and wait for the host to continue."
 
         notice = self._worktree_location_notice(role="boss", custom_path=self._worktree.boss_path)
         parts = [instruction.rstrip()]

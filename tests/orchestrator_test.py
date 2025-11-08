@@ -182,17 +182,14 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert boss_instruction_call.kwargs["pane_id"] == "pane-boss"
     assert "score" in boss_instruction_call.kwargs["instruction"]
     assert "worker-1" in boss_instruction_call.kwargs["instruction"]
-    worker_call, boss_call = monitor.await_completion.call_args_list
+    assert len(monitor.await_completion.call_args_list) == 1
+    worker_call = monitor.await_completion.call_args_list[0]
     assert worker_call.kwargs["session_ids"] == list(dependencies["fork_map"].values())
     worker_signal_map = worker_call.kwargs["signal_paths"]
     assert set(worker_signal_map.keys()) == set(dependencies["fork_map"].values())
     for flag in worker_signal_map.values():
         assert isinstance(flag, Path)
         assert flag.suffix == ".done"
-    assert boss_call.kwargs["session_ids"] == ["session-boss"]
-    boss_signal_map = boss_call.kwargs["signal_paths"]
-    assert list(boss_signal_map.keys()) == ["session-boss"]
-    assert boss_signal_map["session-boss"].suffix == ".done"
     worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
     tmux.promote_to_main.assert_called_once_with(
         session_id="session-boss",

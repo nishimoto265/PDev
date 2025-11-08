@@ -554,3 +554,14 @@
   - uv run pytest
   result: tests 97 passed
   notes: 実際のCodex環境で信号ファイルが生成されることを後日E2Eで確認する
+- date: '2025-11-08'
+  time_utc: '06:31:16'
+  summary: Bossスコア判定をJSON完了ベースに緩和し、rewriteのみ完了フラグを要求
+  details:
+  - `_extract_boss_scores` が箇条書きや複数行のJSONでも復元できるよう前処理を追加
+  - Boss score/skipモードは評価JSONを返した時点で完了扱いとし、rewriteモードのみ統合フェーズで `touch boss.done` を要求
+  - テスト/ドキュメントを新仕様に合わせて更新（scoreモードではmonitor.await_completionを追加で呼ばない）
+  reproduce:
+  - uv run pytest
+  result: tests 97 passed
+  notes: 実際のBossペインでJSONを返した際に自動で遷移することを手動で確認済み

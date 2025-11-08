@@ -352,10 +352,10 @@ class CLIController:
                 "フロー自動化レベルを切り替える",
                 self._cmd_flow,
                 options=[
-                    CommandOption("manual - 選択や採択を手動で行う", FlowMode.MANUAL.value, "選択や採択を手動で行う"),
-                    CommandOption("auto_review - 採点は自動、採択は手動", FlowMode.AUTO_REVIEW.value, "採点は自動、採択は手動"),
-                    CommandOption("auto_select - 採点・採択を自動化", FlowMode.AUTO_SELECT.value, "採点・採択を自動化"),
-                    CommandOption("full_auto - 採点・採択・Boss統合まで自動", FlowMode.FULL_AUTO.value, "採点・採択・Boss統合まで自動"),
+                    CommandOption("manual - 採点段階への移行や採択を手動で行う", FlowMode.MANUAL.value, "採点段階への移行や採択を手動で行う"),
+                    CommandOption("auto_review - 採点段階への移行は自動、採択は手動", FlowMode.AUTO_REVIEW.value, "採点段階への移行は自動、採択は手動"),
+                    CommandOption("auto_select - 採点段階への移行は手動、採択は自動", FlowMode.AUTO_SELECT.value, "採点段階への移行は手動、採択は自動"),
+                    CommandOption("full_auto - 採点段階への移行・採択まで自動", FlowMode.FULL_AUTO.value, "採点段階への移行・採択まで自動"),
                 ],
             ),
             "/parallel": CommandSpecEntry(
