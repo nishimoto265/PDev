@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
+
+from .settings_store import default_config_dir
 
 
 class BossMode(str, Enum):
@@ -68,6 +72,14 @@ class CycleArtifact:
     selected_session_id: Optional[str] = None
 
 
+@dataclass(slots=True)
+class SignalPaths:
+    cycle_id: str
+    root: Path
+    worker_flags: Dict[str, Path]
+    boss_flag: Path
+
+
 class Orchestrator:
     """Coordinates tmux, git worktrees, Codex monitoring, and Boss evaluation."""
 
@@ -94,6 +106,7 @@ class Orchestrator:
         self._active_worker_sessions: List[str] = []
         self._main_session_hook: Optional[Callable[[str], None]] = main_session_hook
         self._worker_decider = worker_decider
+        self._active_signals: Optional[SignalPaths] = None
 
     def set_main_session_hook(self, hook: Optional[Callable[[str], None]]) -> None:
         self._main_session_hook = hook
@@ -116,97 +129,145 @@ class Orchestrator:
         boss_path = self._worktree.boss_path
 
         self._tmux.set_boss_path(boss_path)
+        self._cleanup_signal_paths()
+        signal_paths: Optional[SignalPaths] = None
 
-        layout, baseline = self._prepare_layout(worker_roots)
-        main_session_id, formatted_instruction = self._start_main_session(
-            layout=layout,
-            instruction=instruction,
-            baseline=baseline,
-            resume_session_id=resume_session_id,
-        )
-
-        baseline = self._monitor.snapshot_rollouts()
-        fork_map = self._fork_worker_sessions(
-            layout=layout,
-            main_session_id=main_session_id,
-            baseline=baseline,
-        )
-        self._dispatch_worker_instructions(
-            layout=layout,
-            user_instruction=instruction,
-        )
-        self._active_worker_sessions = [session_id for session_id in fork_map.values() if session_id]
-        completion_info = self._await_worker_completion(fork_map)
-
-        worker_sessions = {
-            layout.pane_to_worker[pane_id]: session_id
-            for pane_id, session_id in fork_map.items()
-        }
-        worker_paths = {
-            layout.pane_to_worker[pane_id]: layout.pane_to_path[pane_id]
-            for pane_id in layout.worker_panes
-            if pane_id in fork_map
-        }
-
-        if self._worker_decider:
-            try:
-                continue_requested = self._worker_decider(fork_map, completion_info, layout)
-            except Exception:
-                continue_requested = False
-        else:
-            continue_requested = False
-
-        artifact = CycleArtifact(
-            main_session_id=main_session_id,
-            worker_sessions=worker_sessions,
-            boss_session_id=None,
-            worker_paths=worker_paths,
-            boss_path=boss_path,
-            instruction=formatted_instruction,
-            tmux_session=self._session_name,
-        )
-
-        if continue_requested:
-            artifact.selected_session_id = main_session_id
-            self._active_worker_sessions = []
-            return OrchestrationResult(
-                selected_session=main_session_id,
-                sessions_summary={},
-                artifact=artifact,
-                continue_requested=True,
+        try:
+            layout, baseline = self._prepare_layout(worker_roots)
+            signal_paths = self._prepare_signal_paths(layout.worker_names)
+            main_session_id, formatted_instruction = self._start_main_session(
+                layout=layout,
+                instruction=instruction,
+                baseline=baseline,
+                resume_session_id=resume_session_id,
             )
 
-        if self._boss_mode == BossMode.SKIP:
-            boss_session_id = None
-            boss_metrics: Dict[str, Dict[str, Any]] = {}
-        else:
-            boss_session_id, boss_metrics = self._run_boss_phase(
+            baseline = self._monitor.snapshot_rollouts()
+            fork_map = self._fork_worker_sessions(
                 layout=layout,
                 main_session_id=main_session_id,
-                user_instruction=instruction.rstrip(),
-                completion_info=completion_info,
+                baseline=baseline,
+            )
+            worker_flag_map: Dict[str, Path] = signal_paths.worker_flags if signal_paths else {}
+            self._dispatch_worker_instructions(
+                layout=layout,
+                user_instruction=instruction,
+                signal_flags=worker_flag_map,
+            )
+            self._active_worker_sessions = [session_id for session_id in fork_map.values() if session_id]
+            session_signal_map: Dict[str, Path] = {}
+            for pane_id, session_id in fork_map.items():
+                worker_name = layout.pane_to_worker.get(pane_id)
+                flag_path = worker_flag_map.get(worker_name) if worker_name else None
+                if session_id and flag_path is not None:
+                    session_signal_map[session_id] = flag_path
+            completion_info = self._await_worker_completion(fork_map, session_signal_map)
+
+            worker_sessions = {
+                layout.pane_to_worker[pane_id]: session_id
+                for pane_id, session_id in fork_map.items()
+            }
+            worker_paths = {
+                layout.pane_to_worker[pane_id]: layout.pane_to_path[pane_id]
+                for pane_id in layout.worker_panes
+                if pane_id in fork_map
+            }
+
+            if self._worker_decider:
+                try:
+                    continue_requested = self._worker_decider(fork_map, completion_info, layout)
+                except Exception:
+                    continue_requested = False
+            else:
+                continue_requested = False
+
+            artifact = CycleArtifact(
+                main_session_id=main_session_id,
+                worker_sessions=worker_sessions,
+                boss_session_id=None,
+                worker_paths=worker_paths,
+                boss_path=boss_path,
+                instruction=formatted_instruction,
+                tmux_session=self._session_name,
             )
 
-        candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
-        artifact.boss_session_id = boss_session_id
-        artifact.boss_path = boss_path if boss_session_id else None
+            if continue_requested:
+                artifact.selected_session_id = main_session_id
+                self._active_worker_sessions = []
+                return OrchestrationResult(
+                    selected_session=main_session_id,
+                    sessions_summary={},
+                    artifact=artifact,
+                    continue_requested=True,
+                )
 
-        if not candidates:
-            scoreboard = {
-                "main": {
-                    "score": None,
-                    "comment": "",
-                    "session_id": main_session_id,
-                    "branch": None,
-                    "worktree": str(self._worktree.root),
-                    "selected": True,
+            if self._boss_mode == BossMode.SKIP:
+                boss_session_id = None
+                boss_metrics: Dict[str, Dict[str, Any]] = {}
+            else:
+                if not signal_paths:
+                    raise RuntimeError("Signal paths were not initialized for boss phase.")
+                boss_session_id, boss_metrics = self._run_boss_phase(
+                    layout=layout,
+                    main_session_id=main_session_id,
+                    user_instruction=instruction.rstrip(),
+                    completion_info=completion_info,
+                    boss_flag=signal_paths.boss_flag,
+                )
+
+            candidates = self._build_candidates(layout, fork_map, boss_session_id, boss_path)
+            artifact.boss_session_id = boss_session_id
+            artifact.boss_path = boss_path if boss_session_id else None
+
+            if not candidates:
+                scoreboard = {
+                    "main": {
+                        "score": None,
+                        "comment": "",
+                        "session_id": main_session_id,
+                        "branch": None,
+                        "worktree": str(self._worktree.root),
+                        "selected": True,
+                    }
                 }
-            }
+                result = OrchestrationResult(
+                    selected_session=main_session_id,
+                    sessions_summary=scoreboard,
+                    artifact=artifact,
+                )
+                log_paths = self._log.record_cycle(
+                    instruction=formatted_instruction,
+                    layout={
+                        "main": layout.main_pane,
+                        "boss": layout.boss_pane,
+                        "workers": list(layout.worker_panes),
+                    },
+                    fork_map=fork_map,
+                    completion=completion_info,
+                    result=result,
+                )
+                artifact.log_paths = log_paths
+                artifact.selected_session_id = main_session_id
+                self._active_worker_sessions = []
+                return result
+
+            decision, scoreboard = self._auto_or_select(
+                candidates,
+                completion_info,
+                selector,
+                boss_metrics,
+            )
+
+            selected_info = self._validate_selection(decision, candidates)
+            self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
+            artifact.selected_session_id = selected_info.session_id
+
             result = OrchestrationResult(
-                selected_session=main_session_id,
+                selected_session=selected_info.session_id,
                 sessions_summary=scoreboard,
                 artifact=artifact,
             )
+
             log_paths = self._log.record_cycle(
                 instruction=formatted_instruction,
                 layout={
@@ -219,42 +280,11 @@ class Orchestrator:
                 result=result,
             )
             artifact.log_paths = log_paths
-            artifact.selected_session_id = main_session_id
             self._active_worker_sessions = []
+
             return result
-
-        decision, scoreboard = self._auto_or_select(
-            candidates,
-            completion_info,
-            selector,
-            boss_metrics,
-        )
-
-        selected_info = self._validate_selection(decision, candidates)
-        self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
-        artifact.selected_session_id = selected_info.session_id
-
-        result = OrchestrationResult(
-            selected_session=selected_info.session_id,
-            sessions_summary=scoreboard,
-            artifact=artifact,
-        )
-
-        log_paths = self._log.record_cycle(
-            instruction=formatted_instruction,
-            layout={
-                "main": layout.main_pane,
-                "boss": layout.boss_pane,
-                "workers": list(layout.worker_panes),
-            },
-            fork_map=fork_map,
-            completion=completion_info,
-            result=result,
-        )
-        artifact.log_paths = log_paths
-        self._active_worker_sessions = []
-
-        return result
+        finally:
+            self._cleanup_signal_paths()
 
     def force_complete_workers(self) -> int:
         if not self._active_worker_sessions:
@@ -300,6 +330,44 @@ class Orchestrator:
             pane_to_worker=pane_to_worker,
             pane_to_path=pane_to_path,
         )
+
+    def _prepare_signal_paths(self, worker_names: Sequence[str]) -> SignalPaths:
+        raw_namespace = getattr(self._worktree, "session_namespace", None)
+        if isinstance(raw_namespace, str) and raw_namespace.strip():
+            namespace = raw_namespace
+        else:
+            namespace = "default"
+        cycle_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+        root = self._signal_base_dir(namespace) / cycle_id
+        root.mkdir(parents=True, exist_ok=True)
+        worker_flags = {name: root / f"{name}.done" for name in worker_names}
+        boss_flag = root / "boss.done"
+        bundle = SignalPaths(
+            cycle_id=cycle_id,
+            root=root,
+            worker_flags=worker_flags,
+            boss_flag=boss_flag,
+        )
+        self._active_signals = bundle
+        return bundle
+
+    def _signal_base_dir(self, namespace: str) -> Path:
+        signals_root = default_config_dir() / "sessions" / namespace / "signals"
+        signals_root.mkdir(parents=True, exist_ok=True)
+        return signals_root
+
+    def _cleanup_signal_paths(self) -> None:
+        bundle = self._active_signals
+        if not bundle:
+            return
+        try:
+            shutil.rmtree(bundle.root)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+        finally:
+            self._active_signals = None
 
     def _start_main_session(
         self,
@@ -376,29 +444,39 @@ class Orchestrator:
         *,
         layout: CycleLayout,
         user_instruction: str,
+        signal_flags: Mapping[str, Path],
     ) -> None:
         for pane_id in layout.worker_panes:
             worker_name = layout.pane_to_worker[pane_id]
             worker_path = layout.pane_to_path.get(pane_id)
             if worker_path is None:
                 continue
+            completion_flag = signal_flags.get(worker_name)
             self._tmux.prepare_for_instruction(pane_id=pane_id)
             location_notice = self._worktree_location_notice(custom_path=worker_path)
             base_message = (
                 f"You are {worker_name}. Your dedicated worktree is `{worker_path}`.\n"
-                "Do not respond with `/done` until you finish the task below.\n\n"
                 "Task:\n"
                 f"{user_instruction.rstrip()}"
             )
-            message = self._ensure_done_directive(base_message, location_notice=location_notice)
+            message = self._ensure_done_directive(
+                base_message,
+                location_notice=location_notice,
+                completion_flag=completion_flag,
+            )
             self._tmux.send_instruction_to_pane(
                 pane_id=pane_id,
                 instruction=message,
             )
 
-    def _await_worker_completion(self, fork_map: Mapping[str, str]) -> Dict[str, Any]:
+    def _await_worker_completion(
+        self,
+        fork_map: Mapping[str, str],
+        signal_map: Mapping[str, Path],
+    ) -> Dict[str, Any]:
         completion_info = self._monitor.await_completion(
-            session_ids=list(fork_map.values())
+            session_ids=list(fork_map.values()),
+            signal_paths=signal_map,
         )
         if os.getenv("PARALLEL_DEV_DEBUG_STATE") == "1":
             print("[parallel-dev] Worker completion status:", completion_info)
@@ -415,6 +493,7 @@ class Orchestrator:
         main_session_id: str,
         user_instruction: str,
         completion_info: Dict[str, Any],
+        boss_flag: Path,
     ) -> tuple[Optional[str], Dict[str, Dict[str, Any]]]:
         if not layout.worker_panes:
             return None, {}
@@ -435,7 +514,12 @@ class Orchestrator:
             "[parallel-dev] All workers reported completion. Inspect boss pane, then press Enter to send boss instructions...",
         )
 
-        boss_instruction = self._build_boss_instruction(layout.worker_names, user_instruction)
+        completion_flag = None if self._boss_mode == BossMode.REWRITE else boss_flag
+        boss_instruction = self._build_boss_instruction(
+            layout.worker_names,
+            user_instruction,
+            completion_flag=completion_flag,
+        )
         self._tmux.send_instruction_to_pane(
             pane_id=layout.boss_pane,
             instruction=boss_instruction,
@@ -444,14 +528,17 @@ class Orchestrator:
         boss_metrics: Dict[str, Dict[str, Any]] = {}
         if self._boss_mode == BossMode.REWRITE:
             boss_metrics = self._wait_for_boss_scores(boss_session_id)
-            followup = self._build_boss_rewrite_followup()
+            followup = self._build_boss_rewrite_followup(boss_flag=boss_flag)
             if followup:
                 self._tmux.prepare_for_instruction(pane_id=layout.boss_pane)
                 self._tmux.send_instruction_to_pane(
                     pane_id=layout.boss_pane,
                     instruction=followup,
                 )
-        boss_completion = self._monitor.await_completion(session_ids=[boss_session_id])
+        boss_completion = self._monitor.await_completion(
+            session_ids=[boss_session_id],
+            signal_paths={boss_session_id: boss_flag},
+        )
         completion_info.update(boss_completion)
         if not boss_metrics:
             boss_metrics = self._extract_boss_scores(boss_session_id)
@@ -562,13 +649,28 @@ class Orchestrator:
                 f"{len(workers)} workers but {self._worker_count} expected"
             )
 
-    def _ensure_done_directive(self, instruction: str, *, location_notice: Optional[str] = None) -> str:
-        directive = (
-            "\n\nCompletion protocol:\n"
-            "- After you finish the requested work and share any summary, you MUST send a new line containing only `/done`.\n"
-            "- Do not describe completion in prose or embed `/done` inside a sentence; the standalone `/done` line is mandatory.\n"
-            "Tasks are treated as unfinished until that literal `/done` line is sent."
-        )
+    def _ensure_done_directive(
+        self,
+        instruction: str,
+        *,
+        location_notice: Optional[str] = None,
+        completion_flag: Optional[Path] = None,
+    ) -> str:
+        if completion_flag is not None:
+            flag_text = str(completion_flag)
+            directive = (
+                "\n\nCompletion protocol:\n"
+                f"- When the entire task is complete, run `touch {flag_text}` (no markdown, single command).\n"
+                "- The host watches that file and will automatically continue once it exists—no `/done` line is required.\n"
+                f"- If you signaled completion too early, remove the flag with `rm -f {flag_text}` and keep working."
+            )
+        else:
+            directive = (
+                "\n\nCompletion protocol:\n"
+                "- After you finish the requested work and share any summary, you MUST send a new line containing only `/done`.\n"
+                "- Do not describe completion in prose or embed `/done` inside a sentence; the standalone `/done` line is mandatory.\n"
+                "Tasks are treated as unfinished until that literal `/done` line is sent."
+            )
         notice = location_notice or self._worktree_location_notice()
 
         parts = [instruction.rstrip()]
@@ -736,6 +838,8 @@ class Orchestrator:
         self,
         worker_names: Sequence[str],
         user_instruction: str,
+        *,
+        completion_flag: Optional[Path] = None,
     ) -> str:
         worker_paths: Dict[str, Path] = getattr(self._worktree, "_worker_paths", {})
         worker_lines: List[str] = []
@@ -766,28 +870,41 @@ class Orchestrator:
             "    ... other candidates ...\n"
             "  }\n"
             "}\n\n"
-            "Output only the JSON object for the evaluation—do NOT return Markdown, prose, or `/done` at this stage.\n"
+            "Output only the JSON object for the evaluation—do NOT return Markdown or prose at this stage.\n"
         )
         if self._boss_mode == BossMode.REWRITE:
             instruction += (
-                "After you emit the JSON scoreboard, remain in this boss workspace and produce the final merged solution.\n"
-                "When the merged implementation is complete, respond with /done."
+                "After you emit the JSON scoreboard, wait for the follow-up instructions to perform the final integration."
             )
         else:
-            instruction += "After the JSON response, send /done."
-        return instruction
+            instruction += "After the JSON response, follow the completion protocol to signal the host."
 
-    def _build_boss_rewrite_followup(self) -> str:
+        if completion_flag is not None:
+            notice = self._worktree_location_notice(role="boss", custom_path=self._worktree.boss_path)
+            return self._ensure_done_directive(
+                instruction,
+                location_notice=notice,
+                completion_flag=completion_flag,
+            )
+
+        notice = self._worktree_location_notice(role="boss", custom_path=self._worktree.boss_path)
+        parts = [instruction.rstrip()]
+        if notice and notice.strip() not in instruction:
+            parts.append(notice)
+        return "".join(parts)
+
+    def _build_boss_rewrite_followup(self, *, boss_flag: Path) -> str:
         if self._boss_mode != BossMode.REWRITE:
             return ""
+        flag_text = str(boss_flag)
         return (
             "Boss integration phase:\n"
             "You have already produced the JSON scoreboard for the workers.\n"
             "Now stay in this boss workspace and deliver the final merged implementation.\n"
             "- Review the worker outputs you just scored and decide how to combine or refine them.\n"
             "- If one worker result is already ideal, copy it into this boss workspace; otherwise, refactor or merge the strongest parts.\n"
-            "Make all required edits here so this boss workspace becomes the final solution.\n"
-            "When the boss implementation is complete, respond with /done."
+            f"When the integration is completely finished, run `touch {flag_text}` to signal completion.\n"
+            f"If you need to continue editing after signaling, remove the flag with `rm -f {flag_text}` and keep working."
         )
 
     def _wait_for_boss_scores(self, boss_session_id: str, timeout: float = 120.0) -> Dict[str, Dict[str, Any]]:

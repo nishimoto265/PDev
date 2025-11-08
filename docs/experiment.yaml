@@ -543,3 +543,14 @@
   - uv run pytest
   result: tests 97 passed
   notes: マッピングファイルの場所が固定化されたため、並列実行時の確認が容易になった
+- date: '2025-11-07'
+  time_utc: '06:17:50'
+  summary: 完了フラグ監視とログ配置の統一を実装
+  details:
+  - Orchestratorが `~/.parallel-dev/sessions/<namespace>/signals/<cycle>/worker-N.done`／`boss.done` を割り当て、worker/Bossプロンプトへ`touch`手順を埋め込むよう更新
+  - CodexMonitor.await_completionが`signal_paths`を受け取り、フラグ生成のみで完了判定するようリファクタリング（/done検出はレガシー互換用に温存）
+  - CLI設定値にかかわらずログを `~/.parallel-dev/logs/<session_id>/<cycle_timestamp>/` へ集約し、要件・フロー図のドキュメントを同内容で更新
+  reproduce:
+  - uv run pytest
+  result: tests 97 passed
+  notes: 実際のCodex環境で信号ファイルが生成されることを後日E2Eで確認する

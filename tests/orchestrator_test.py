@@ -155,9 +155,10 @@ def test_orchestrator_runs_happy_path(dependencies):
         message = call.kwargs["instruction"]
         worker_path = expected_worker_paths[f"pane-worker-{idx}"]
         assert str(worker_path) in message
-        assert "Run `pwd`" in message
         assert dependencies["instruction"] in message
-        assert "/done" in message
+        assert "Completion protocol" in message
+        assert "touch" in message
+        assert "no `/done` line is required" in message
     monitor.register_worker_rollouts.assert_called_once()
     tmux.fork_boss.assert_called_once_with(
         pane_id="pane-boss",
@@ -182,10 +183,16 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert "score" in boss_instruction_call.kwargs["instruction"]
     assert "worker-1" in boss_instruction_call.kwargs["instruction"]
     worker_call, boss_call = monitor.await_completion.call_args_list
-    assert worker_call.kwargs == {
-        "session_ids": list(dependencies["fork_map"].values())
-    }
-    assert boss_call.kwargs == {"session_ids": ["session-boss"]}
+    assert worker_call.kwargs["session_ids"] == list(dependencies["fork_map"].values())
+    worker_signal_map = worker_call.kwargs["signal_paths"]
+    assert set(worker_signal_map.keys()) == set(dependencies["fork_map"].values())
+    for flag in worker_signal_map.values():
+        assert isinstance(flag, Path)
+        assert flag.suffix == ".done"
+    assert boss_call.kwargs["session_ids"] == ["session-boss"]
+    boss_signal_map = boss_call.kwargs["signal_paths"]
+    assert list(boss_signal_map.keys()) == ["session-boss"]
+    assert boss_signal_map["session-boss"].suffix == ".done"
     worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
     tmux.promote_to_main.assert_called_once_with(
         session_id="session-boss",
@@ -299,8 +306,13 @@ def test_ensure_done_directive_always_appends(dependencies):
     instruction = "作業して完了したら /done"
     ensured = orchestrator._ensure_done_directive(instruction)
     assert "Completion protocol" in ensured
-    assert "Run `pwd`" in ensured
     assert "standalone `/done` line is mandatory" in ensured
+    flagged = orchestrator._ensure_done_directive(
+        instruction,
+        completion_flag=Path("/tmp/flag.done"),
+    )
+    assert "touch /tmp/flag.done" in flagged
+    assert "standalone `/done` line is mandatory" not in flagged
     ensured_again = orchestrator._ensure_done_directive(ensured)
     assert ensured_again == ensured
 
@@ -362,7 +374,7 @@ def test_boss_instruction_rewrite_mode():
     assert "worker-1 (worktree: /repo/.parallel-dev/sessions/session-a/worktrees/worker-1)" in text
     assert "Evaluation checklist" in text
     assert "Output only the JSON object for the evaluation—do NOT return Markdown" in text
-    assert "remain in this boss workspace and produce the final merged solution" in text
+    assert "follow-up instructions" in text
 
 
 def test_rewrite_mode_sends_followup_prompt(dependencies):
@@ -411,3 +423,4 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
     ]
     assert len(boss_calls) >= 2
     assert "Boss integration phase" in boss_calls[1]
+    assert "touch" in boss_calls[1]

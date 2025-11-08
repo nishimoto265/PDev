@@ -30,6 +30,15 @@ from .settings_store import (
 from .workflow import WorkflowManager
 
 
+def _ensure_logs_directory(identifier: str) -> Path:
+    """Create and return the logs directory for the given identifier."""
+    base_dir = default_config_dir() / "logs"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    target = base_dir / identifier
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 class SessionMode(str, Enum):
     PARALLEL = "parallel"
     MAIN = "main"
@@ -1086,7 +1095,10 @@ class CLIController:
         self._config.tmux_session = manifest.tmux_session
         self._config.worker_count = manifest.worker_count
         self._config.mode = SessionMode(manifest.mode)
-        self._config.logs_root = Path(manifest.logs_dir).parent if manifest.logs_dir else Path("logs")
+        if manifest.logs_dir:
+            self._config.logs_root = Path(manifest.logs_dir).parent
+        else:
+            self._config.logs_root = _ensure_logs_directory(manifest.session_id)
         self._config.reuse_existing_session = True
         self._last_scoreboard = manifest.scoreboard or {}
         self._last_instruction = manifest.latest_instruction
@@ -1208,8 +1220,7 @@ class CLIController:
     def _create_initial_config(self) -> SessionConfig:
         session_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + datetime.utcnow().strftime("%f")[:6]
         tmux_session = f"parallel-dev-{session_id}"
-        logs_root = Path("logs") / session_id
-        logs_root.mkdir(parents=True, exist_ok=True)
+        logs_root = _ensure_logs_directory(session_id)
         return SessionConfig(
             session_id=session_id,
             tmux_session=tmux_session,
@@ -1310,8 +1321,11 @@ def build_orchestrator(
 ) -> Orchestrator:
     session_name = session_name or "parallel-dev"
     timestamp = datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
-    base_logs_dir = Path(log_dir) if log_dir else Path("logs") / timestamp
-    base_logs_dir.mkdir(parents=True, exist_ok=True)
+    if log_dir:
+        base_logs_dir = Path(log_dir)
+        base_logs_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        base_logs_dir = _ensure_logs_directory(timestamp)
     map_session_id = session_namespace or session_name or "parallel-dev"
     session_map_dir = default_config_dir() / "session_maps"
     session_map_dir.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,7 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Union
 
 import git
 import libtmux
@@ -426,6 +426,7 @@ class CodexMonitor:
         self._registry_dir = self.session_map_path.parent / "codex_session_registry"
         self._owned_sessions: Set[str] = set()
         self._forced_done: Set[str] = set()
+        self._active_signal_paths: Dict[str, Path] = {}
 
     def register_session(self, *, pane_id: str, session_id: str, rollout_path: Path) -> None:
         data = self._load_map()
@@ -656,6 +657,7 @@ class CodexMonitor:
         *,
         session_ids: Iterable[str],
         timeout_seconds: Optional[int] = None,
+        signal_paths: Optional[Mapping[str, Union[str, Path]]] = None,
     ) -> Dict[str, Any]:
         data = self._load_map()
         sessions = data.get("sessions", {})
@@ -671,6 +673,14 @@ class CodexMonitor:
 
         remaining = set(targets)
         completion: Dict[str, Any] = {}
+        signal_targets: Dict[str, Path] = {}
+        if signal_paths:
+            for session_id, raw_path in signal_paths.items():
+                if not session_id:
+                    continue
+                flag_path = Path(raw_path)
+                signal_targets[session_id] = flag_path
+                self._active_signal_paths[session_id] = flag_path
 
         def consume_forced() -> None:
             forced_now = remaining.intersection(self._forced_done)
@@ -689,6 +699,13 @@ class CodexMonitor:
                 }
                 remaining.discard(session_id)
                 self._forced_done.discard(session_id)
+                flag_path = signal_targets.pop(session_id, None)
+                if flag_path:
+                    self._active_signal_paths.pop(session_id, None)
+                    try:
+                        flag_path.unlink()
+                    except OSError:
+                        pass
 
         consume_forced()
         deadline = None if timeout_seconds is None else time.time() + timeout_seconds
@@ -699,6 +716,29 @@ class CodexMonitor:
                 break
             for session_id in list(remaining):
                 rollout_path = targets[session_id]
+                flag_path = signal_targets.get(session_id)
+                if flag_path is not None:
+                    if flag_path.exists():
+                        try:
+                            offset = rollout_path.stat().st_size
+                        except OSError:
+                            offset = offsets.get(session_id, 0)
+                        offsets[session_id] = offset
+                        self._update_session_offset(session_id, offset)
+                        completion[session_id] = {
+                            "done": True,
+                            "rollout_path": str(rollout_path),
+                            "signal_path": str(flag_path),
+                        }
+                        remaining.remove(session_id)
+                        signal_targets.pop(session_id, None)
+                        self._active_signal_paths.pop(session_id, None)
+                        try:
+                            flag_path.unlink()
+                        except OSError:
+                            pass
+                    # Skip textual detection when a signal file is expected.
+                    continue
                 done, new_offset = self._contains_done(
                     session_id=session_id,
                     rollout_path=rollout_path,
@@ -721,6 +761,9 @@ class CodexMonitor:
                 "done": False,
                 "rollout_path": str(targets[session_id]),
             }
+
+        for session_id in signal_targets:
+            self._active_signal_paths.pop(session_id, None)
 
         return completion
 
