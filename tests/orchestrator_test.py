@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List
+from typing import Any, List, Mapping
 from unittest.mock import Mock, call
 
 import pytest
@@ -216,17 +216,32 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert result.artifact.boss_session_id == "session-boss"
 
 
-def test_orchestrator_continue_skips_boss_phase(dependencies):
-    decider_called = []
+def test_orchestrator_continue_flows_into_boss_phase(dependencies):
+    decisions = []
 
     def worker_decider(fork_map, completion, layout):
-        decider_called.append(True)
-        return True
+        decisions.append(completion)
+        # request continue only on first completion
+        return len(decisions) == 1
+
+    monitor = dependencies["monitor"]
+    monitor.await_completion.side_effect = [
+        {
+            "session-worker-1": {"done": True},
+            "session-worker-2": {"done": True},
+            "session-worker-3": {"done": True},
+        },
+        {
+            "session-worker-1": {"done": True},
+            "session-worker-2": {"done": True},
+            "session-worker-3": {"done": True},
+        },
+    ]
 
     orchestrator = Orchestrator(
         tmux_manager=dependencies["tmux"],
         worktree_manager=dependencies["worktree"],
-        monitor=dependencies["monitor"],
+        monitor=monitor,
         log_manager=dependencies["logger"],
         worker_count=3,
         session_name="parallel-dev",
@@ -234,16 +249,18 @@ def test_orchestrator_continue_skips_boss_phase(dependencies):
         boss_mode=BossMode.SCORE,
     )
 
-    orchestrator._run_boss_phase = Mock(name="run_boss_phase")
+    orchestrator._run_boss_phase = Mock(name="run_boss_phase", return_value=(None, {}))
 
-    result = orchestrator.run_cycle(dependencies["instruction"], selector=lambda *_: SelectionDecision("boss", {}))
+    orchestrator.run_cycle(
+        dependencies["instruction"],
+        selector=lambda candidates, **_: SelectionDecision(
+            selected_key=candidates[0].key,
+            scores={candidate.key: 0.0 for candidate in candidates},
+        ),
+    )
 
-    assert decider_called
-    orchestrator._run_boss_phase.assert_not_called()
-    dependencies["logger"].record_cycle.assert_not_called()
-    assert result.continue_requested is True
-    assert result.artifact is not None
-    assert result.artifact.main_session_id == "session-main"
+    assert len(monitor.await_completion.call_args_list) == 2
+    orchestrator._run_boss_phase.assert_called_once()
 
 
 def test_orchestrator_reuses_main_session_without_resume(dependencies):
@@ -421,3 +438,53 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
     assert len(boss_calls) >= 2
     assert "Boss integration phase" in boss_calls[1]
     assert "touch" in boss_calls[1]
+
+
+def test_orchestrator_continue_resends_instruction(dependencies):
+    tmux = dependencies["tmux"]
+    monitor = dependencies["monitor"]
+
+    completion_first = {
+        "session-worker-1": {"done": True},
+        "session-worker-2": {"done": True},
+        "session-worker-3": {"done": True},
+    }
+    completion_second = {
+        "session-worker-1": {"done": True},
+        "session-worker-2": {"done": True},
+        "session-worker-3": {"done": True},
+    }
+    monitor.await_completion.side_effect = [completion_first, completion_second]
+
+    decisions: List[Mapping[str, Any]] = []
+
+    def worker_decider(fork_map, completion, layout):
+        decisions.append(completion)
+        return len(decisions) == 1  # first completion requests continue, second ends
+
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=dependencies["worktree"],
+        monitor=monitor,
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        worker_decider=worker_decider,
+        boss_mode=BossMode.SKIP,
+    )
+
+    def selector(candidates, scoreboard=None):
+        return SelectionDecision(
+            selected_key=candidates[0].key,
+            scores={candidate.key: 0.0 for candidate in candidates},
+        )
+
+    orchestrator.run_cycle(dependencies["instruction"], selector=selector)
+
+    assert monitor.await_completion.call_count == 2
+    resent = [
+        call.kwargs["instruction"]
+        for call in tmux.send_instruction_to_pane.call_args_list
+        if call.kwargs.get("instruction") == dependencies["instruction"]
+    ]
+    assert resent, "Continue should resend the original user instruction verbatim"

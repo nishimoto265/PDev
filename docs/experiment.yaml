@@ -560,6 +560,7 @@
   details:
   - `_extract_boss_scores` が箇条書きや複数行のJSONでも復元できるよう前処理を追加
   - Boss score/skipモードは評価JSONを返した時点で完了扱いとし、rewriteモードのみ統合フェーズで `touch boss.done` を要求
+  - `/continue` 選択時は既存ワーカーペインへ元の指示を再送し、ワークツリーを再作成せずに追作業できるようOrchestrator側のループ処理を導入
   - テスト/ドキュメントを新仕様に合わせて更新（scoreモードではmonitor.await_completionを追加で呼ばない）
   reproduce:
   - uv run pytest
