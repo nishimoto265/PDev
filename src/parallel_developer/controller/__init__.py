@@ -23,7 +23,17 @@ from .events import ControllerEventType
 from .flow import WorkerFlowHelper
 from .pause import PauseHelper
 from .history import HistoryManager
-from ..orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision, WorkerDecision
+from ..orchestrator import (
+    BossMode,
+    CandidateInfo,
+    CycleLayout,
+    OrchestrationResult,
+    Orchestrator,
+    SelectionDecision,
+    WorkerDecision,
+    MergeStrategy,
+    MergeOutcome,
+)
 from ..services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
 from ..stores import (
     ManifestStore,
@@ -63,6 +73,11 @@ FLOW_MODE_LABELS = {
     FlowMode.AUTO_REVIEW: "Auto Review",
     FlowMode.AUTO_SELECT: "Auto Select",
     FlowMode.FULL_AUTO: "Full Auto",
+}
+MERGE_STRATEGY_LABELS = {
+    MergeStrategy.FAST_ONLY: "Fast-Forward",
+    MergeStrategy.AGENT_ONLY: "Agent",
+    MergeStrategy.FAST_THEN_AGENT: "Fast→Agent",
 }
 
 
@@ -166,6 +181,7 @@ class SessionConfig:
     boss_mode: BossMode = BossMode.SCORE
     flow_mode: FlowMode = FlowMode.MANUAL
     reuse_existing_session: bool = False
+    merge_strategy: MergeStrategy = MergeStrategy.FAST_ONLY
 
 @dataclass
 class SelectionContext:
@@ -229,6 +245,12 @@ class CLIController:
         except ValueError:
             self._flow_mode = FlowMode.MANUAL
         self._config.flow_mode = self._flow_mode
+        saved_merge_mode = self._settings_store.merge
+        try:
+            self._merge_strategy = MergeStrategy(saved_merge_mode)
+        except ValueError:
+            self._merge_strategy = MergeStrategy.FAST_ONLY
+        self._config.merge_strategy = self._merge_strategy
         self._auto_commit_enabled: bool = self._settings_store.commit == "auto"
         try:
             self._config.worker_count = max(1, int(self._settings_store.parallel or "3"))
@@ -246,6 +268,7 @@ class CLIController:
             self,
             flow_mode_cls=FlowMode,
             boss_mode_cls=BossMode,
+            merge_strategy_cls=MergeStrategy,
         )
         self._worker_flow = WorkerFlowHelper(self, FlowMode)
         self._pause_helper = PauseHelper(self)
@@ -472,6 +495,36 @@ class CLIController:
         self._settings_store.flow = new_mode.value
         self._emit(ControllerEventType.LOG, {"text": f"フローモードを {self._flow_mode_display(new_mode)} に設定しました。"})
         self._emit_status("待機中")
+
+    async def _cmd_merge(self, option: Optional[object]) -> None:
+        if option is None:
+            lines = [
+                f"現在のマージ戦略: {self._merge_strategy_display()}",
+                "利用可能な戦略:",
+            ]
+            for strategy in MergeStrategy:
+                lines.append(f"  {strategy.value:16s} : {self._merge_strategy_display(strategy)}")
+            lines.append("使い方: /merge [fast_only|agent_only|fast_then_agent]")
+            self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
+            return
+
+        token = str(option).strip().lower().replace("-", "_")
+        mapping = {strategy.value: strategy for strategy in MergeStrategy}
+        new_strategy = mapping.get(token)
+        if new_strategy is None:
+            self._emit(
+                ControllerEventType.LOG,
+                {"text": "使い方: /merge [fast_only|agent_only|fast_then_agent]"},
+            )
+            return
+        if new_strategy == getattr(self, "_merge_strategy", MergeStrategy.FAST_ONLY):
+            self._emit(ControllerEventType.LOG, {"text": f"マージ戦略は既に {self._merge_strategy_display(new_strategy)} です。"})
+            return
+
+        self._merge_strategy = new_strategy
+        self._config.merge_strategy = new_strategy
+        self._settings_store.merge = new_strategy.value
+        self._emit(ControllerEventType.LOG, {"text": f"マージ戦略を {self._merge_strategy_display(new_strategy)} に設定しました。"})
 
     async def _cmd_attach(self, option: Optional[object]) -> None:
         mode = str(option).lower() if option is not None else None
@@ -1118,6 +1171,12 @@ class CLIController:
             return FLOW_MODE_LABELS.get(current, current.value)
         return str(current)
 
+    def _merge_strategy_display(self, strategy: Optional[MergeStrategy] = None) -> str:
+        current = strategy or getattr(self, "_merge_strategy", MergeStrategy.FAST_ONLY)
+        if isinstance(current, MergeStrategy):
+            return MERGE_STRATEGY_LABELS.get(current, current.value)
+        return str(current)
+
     def _create_initial_config(self) -> SessionConfig:
         session_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + datetime.utcnow().strftime("%f")[:6]
         tmux_session = f"parallel-dev-{session_id}"
@@ -1130,6 +1189,7 @@ class CLIController:
             logs_root=logs_root,
             boss_mode=BossMode.SCORE,
             flow_mode=FlowMode.MANUAL,
+            merge_strategy=MergeStrategy.FAST_ONLY,
         )
 
     def _create_cycle_logs_dir(self) -> Path:
@@ -1194,6 +1254,32 @@ class CLIController:
             workers=workers,
         )
 
+    def _handle_merge_outcome(self, outcome: Optional[MergeOutcome]) -> None:
+        if outcome is None:
+            return
+        branch = outcome.branch or "選択されたブランチ"
+        status = outcome.status
+        error = outcome.error
+        reason_key = outcome.reason
+        reason_labels = {
+            "strategy_agent_only": "設定で自動マージを無効化",
+            "fast_forward_failed": "Fast-Forwardに失敗",
+        }
+        if status == "merged":
+            self._emit(ControllerEventType.LOG, {"text": f"[merge] {branch} を fast-forward で main に反映しました。"})
+        elif status == "delegate":
+            label = reason_labels.get(reason_key, reason_key or "手動統合に切り替え")
+            detail = f" 詳細: {error}" if error else ""
+            self._emit(
+                ControllerEventType.LOG,
+                {"text": f"[merge] 自動マージをスキップし、エージェントに委譲します ({label}).{detail}"},
+            )
+        elif status == "failed":
+            self._emit(
+                ControllerEventType.LOG,
+                {"text": f"[merge] {branch} の自動マージに失敗しました: {error or '理由不明'}. /merge コマンドで戦略を切り替えてください。"},
+            )
+
     @staticmethod
     def _default_builder(
         *,
@@ -1220,6 +1306,7 @@ def build_orchestrator(
     project_root: Optional[Path] = None,
     worktree_storage_root: Optional[Path] = None,
     log_hook: Optional[Callable[[str], None]] = None,
+    merge_strategy: MergeStrategy = MergeStrategy.FAST_ONLY,
 ) -> Orchestrator:
     session_name = session_name or "parallel-dev"
     timestamp = datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
@@ -1276,4 +1363,5 @@ def build_orchestrator(
         session_name=session_name,
         boss_mode=boss_mode,
         log_hook=log_hook,
+        merge_strategy=merge_strategy,
     )

@@ -33,9 +33,11 @@ def build_command_specs(
     *,
     flow_mode_cls,
     boss_mode_cls,
+    merge_strategy_cls,
 ) -> Dict[str, CommandSpecEntry]:
     FlowMode = flow_mode_cls  # alias for brevity
-    return {
+    MergeStrategy = merge_strategy_cls
+    specs = {
         "/attach": CommandSpecEntry(
             "tmux接続の方法を切り替える",
             controller._cmd_attach,
@@ -62,6 +64,27 @@ def build_command_specs(
                 CommandOption("auto_review - 採点段階への移行は自動、採択は手動", FlowMode.AUTO_REVIEW.value, "採点段階への移行は自動、採択は手動"),
                 CommandOption("auto_select - 採点段階への移行は手動、採択は自動", FlowMode.AUTO_SELECT.value, "採点段階への移行は手動、採択は自動"),
                 CommandOption("full_auto - 採点段階への移行・採択まで自動", FlowMode.FULL_AUTO.value, "採点段階への移行・採択まで自動"),
+            ],
+        ),
+        "/merge": CommandSpecEntry(
+            "マージ方式を切り替える",
+            controller._cmd_merge,
+            options=[
+                CommandOption(
+                    "fast_only - Fast-Forwardのみ",
+                    MergeStrategy.FAST_ONLY.value,
+                    "GitのFast-Forwardだけを試みる",
+                ),
+                CommandOption(
+                    "agent_only - エージェントに任せる",
+                    MergeStrategy.AGENT_ONLY.value,
+                    "Gitマージは行わずエージェントに任せる",
+                ),
+                CommandOption(
+                    "fast_then_agent - 失敗時はエージェント",
+                    MergeStrategy.FAST_THEN_AGENT.value,
+                    "Fast-Forwardを試み失敗時にエージェントへ移行",
+                ),
             ],
         ),
         "/parallel": CommandSpecEntry(
@@ -111,3 +134,5 @@ def build_command_specs(
         "/help": CommandSpecEntry("コマンド一覧を表示する", controller._cmd_help),
         "/exit": CommandSpecEntry("CLI を終了する", controller._cmd_exit),
     }
+    specs["/marge"] = specs["/merge"]
+    return specs

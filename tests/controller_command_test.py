@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import yaml
 
-from parallel_developer.controller import CLIController, FlowMode
-from parallel_developer.orchestrator import BossMode, CandidateInfo, OrchestrationResult
+from parallel_developer.controller import CLIController, FlowMode, MergeStrategy
+from parallel_developer.orchestrator import BossMode, CandidateInfo, MergeOutcome, OrchestrationResult
 from parallel_developer.stores import PaneRecord, SessionManifest, SessionReference, SettingsStore
 
 
@@ -91,6 +91,33 @@ def test_mode_command(controller, event_recorder):
     events.clear()
     _run(controller.execute_command("/mode", "invalid"))
     assert any("使い方" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_merge_command(controller, event_recorder):
+    events, _ = event_recorder
+    _run(controller.execute_command("/merge", "agent_only"))
+    assert controller._merge_strategy == MergeStrategy.AGENT_ONLY
+    assert any("マージ戦略を" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    _run(controller.execute_command("/merge"))
+    assert any("現在のマージ戦略" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    _run(controller.execute_command("/merge", "invalid"))
+    assert any("使い方" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_handle_merge_outcome_logging(controller, event_recorder):
+    events, _ = event_recorder
+    outcome = MergeOutcome(strategy=MergeStrategy.FAST_ONLY, status="merged", branch="feature")
+    controller._handle_merge_outcome(outcome)
+    assert any("fast-forward" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    delegate = MergeOutcome(strategy=MergeStrategy.AGENT_ONLY, status="delegate", branch="feature", reason="strategy_agent_only")
+    controller._handle_merge_outcome(delegate)
+    assert any("エージェント" in payload.get("text", "") for event, payload in events if event == "log")
 
 
 def test_status_and_scoreboard_commands(controller, event_recorder):

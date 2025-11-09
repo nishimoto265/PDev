@@ -50,6 +50,7 @@ class WorkflowRunner:
             project_root=c._worktree_root,
             worktree_storage_root=c._worktree_storage_root,
             log_hook=self._controller._log_hook,
+            merge_strategy=c._config.merge_strategy,
         )
         c._active_orchestrator = orchestrator
         c._last_tmux_manager = getattr(orchestrator, "_tmux", None)
@@ -84,6 +85,8 @@ class WorkflowRunner:
             if c._attach_mode == "auto":
                 auto_attach_task = asyncio.create_task(c._handle_attach_command(force=False))
             result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
+            if getattr(result, "merge_outcome", None) is not None:
+                c._handle_merge_outcome(result.merge_outcome)
             if cycle_id in c._cancelled_cycles:
                 cancelled = True
                 c._cancelled_cycles.discard(cycle_id)

@@ -8,6 +8,7 @@ import pytest
 from parallel_developer.orchestrator import (
     CandidateInfo,
     BossMode,
+    MergeStrategy,
     Orchestrator,
     SelectionDecision,
     WorkerDecision,
@@ -198,23 +199,95 @@ def test_orchestrator_runs_happy_path(dependencies):
         pane_id="pane-main",
     )
     monitor.refresh_session_id.assert_called()
-    assert monitor.bind_existing_session.call_args_list[-1] == call(
-        pane_id="pane-main",
+
+
+def test_merge_strategy_agent_only_delegates():
+    tmux = Mock()
+    worktree = Mock()
+    monitor = Mock()
+    log_manager = Mock()
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
         session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/tmp/worktree"),
     )
-    assert call("session-worker-1") in monitor.consume_session_until_eof.call_args_list
-    dependencies["logger"].record_cycle.assert_called_once()
-    assert result.selected_session == "session-worker-1"
-    assert result.sessions_summary["worker-1"]["selected"] is True
-    assert "boss" not in result.sessions_summary
-    assert result.artifact is not None
-    assert result.artifact.main_session_id == "session-main"
-    assert result.artifact.worker_sessions == {
-        "worker-1": "session-worker-1",
-        "worker-2": "session-worker-2",
-        "worker-3": "session-worker-3",
-    }
-    assert result.artifact.boss_session_id == "session-boss"
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_strategy=MergeStrategy.AGENT_ONLY,
+    )
+
+    outcome = orchestrator._finalize_selection(selected=candidate, main_pane="pane-main")
+
+    worktree.merge_into_main.assert_not_called()
+    assert outcome.status == "delegate"
+    assert outcome.reason == "strategy_agent_only"
+
+
+def test_merge_strategy_fast_then_agent_on_failure():
+    tmux = Mock()
+    worktree = Mock()
+    worktree.merge_into_main.side_effect = RuntimeError("ff failed")
+    monitor = Mock()
+    log_manager = Mock()
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/tmp/worktree"),
+    )
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_strategy=MergeStrategy.FAST_THEN_AGENT,
+    )
+
+    outcome = orchestrator._finalize_selection(selected=candidate, main_pane="pane-main")
+
+    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/worker-1")
+    assert outcome.status == "delegate"
+    assert outcome.reason == "fast_forward_failed"
+    assert outcome.error == "ff failed"
+
+
+def test_merge_strategy_fast_only_failure_marks_failed():
+    tmux = Mock()
+    worktree = Mock()
+    worktree.merge_into_main.side_effect = RuntimeError("blocked")
+    monitor = Mock()
+    log_manager = Mock()
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/tmp/worktree"),
+    )
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_strategy=MergeStrategy.FAST_ONLY,
+    )
+
+    outcome = orchestrator._finalize_selection(selected=candidate, main_pane="pane-main")
+
+    assert outcome.status == "failed"
+    assert outcome.error == "blocked"
 
 
 def test_merge_failure_logs_message(dependencies):

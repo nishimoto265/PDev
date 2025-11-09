@@ -51,6 +51,7 @@ class SettingsData:
     parallel: str = "3"
     mode: str = "parallel"
     commit: str = "manual"
+    merge: str = "fast_only"
     worktree_root: Optional[str] = None
 
 
@@ -120,6 +121,15 @@ class SettingsStore:
     def worktree_root(self) -> Optional[str]:
         return self._data.worktree_root
 
+    @property
+    def merge(self) -> str:
+        return self._data.merge
+
+    @merge.setter
+    def merge(self, value: str) -> None:
+        self._data.merge = value
+        self._save()
+
     @worktree_root.setter
     def worktree_root(self, value: Optional[object]) -> None:
         self._data.worktree_root = str(value) if value else None
@@ -134,6 +144,7 @@ class SettingsStore:
                 "parallel": self._data.parallel,
                 "mode": self._data.mode,
                 "commit": self._data.commit,
+                "merge": self._data.merge,
             }
         }
         if self._data.worktree_root:
@@ -149,6 +160,7 @@ class SettingsStore:
         parallel: Optional[str] = None,
         mode: Optional[str] = None,
         commit: Optional[str] = None,
+        merge: Optional[str] = None,
         worktree_root: object = _UNSET,
     ) -> None:
         if attach is not None:
@@ -163,6 +175,8 @@ class SettingsStore:
             self._data.mode = mode
         if commit is not None:
             self._data.commit = commit
+        if merge is not None:
+            self._data.merge = merge
         if worktree_root is not _UNSET:
             self._data.worktree_root = str(worktree_root) if worktree_root else None
         self._save()
@@ -193,6 +207,7 @@ class SettingsStore:
                 parallel=str(commands.get("parallel", "3")),
                 mode=str(commands.get("mode", "parallel")),
                 commit=str(commands.get("commit", "manual")),
+                merge=str(commands.get("merge", "fast_only")),
                 worktree_root=worktree_root_value,
             )
 
@@ -204,6 +219,7 @@ class SettingsStore:
             parallel=str(payload.get("worker_count", "3")),
             mode=str(payload.get("session_mode", "parallel")),
             commit="auto" if bool(payload.get("auto_commit", False)) else "manual",
+            merge="fast_only",
             worktree_root=None,
         )
 

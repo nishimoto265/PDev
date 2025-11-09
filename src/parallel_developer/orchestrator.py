@@ -21,6 +21,12 @@ class BossMode(str, Enum):
     REWRITE = "rewrite"
 
 
+class MergeStrategy(str, Enum):
+    FAST_ONLY = "fast_only"
+    AGENT_ONLY = "agent_only"
+    FAST_THEN_AGENT = "fast_then_agent"
+
+
 @dataclass(slots=True)
 class OrchestrationResult:
     """Return value for a full orchestration cycle."""
@@ -29,6 +35,7 @@ class OrchestrationResult:
     sessions_summary: Mapping[str, Any] = field(default_factory=dict)
     artifact: Optional["CycleArtifact"] = None
     continue_requested: bool = False
+    merge_outcome: Optional["MergeOutcome"] = None
 
 
 @dataclass(slots=True)
@@ -86,6 +93,15 @@ class SignalPaths:
     boss_flag: Path
 
 
+@dataclass(slots=True)
+class MergeOutcome:
+    strategy: MergeStrategy
+    status: Literal["skipped", "merged", "delegate", "failed"]
+    branch: Optional[str] = None
+    error: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class Orchestrator:
     """Coordinates tmux, git worktrees, Codex monitoring, and Boss evaluation."""
 
@@ -102,6 +118,7 @@ class Orchestrator:
         worker_decider: Optional[Callable[[Mapping[str, str], Mapping[str, Any], "CycleLayout"], WorkerDecision]] = None,
         boss_mode: BossMode = BossMode.SCORE,
         log_hook: Optional[Callable[[str], None]] = None,
+        merge_strategy: MergeStrategy = MergeStrategy.FAST_ONLY,
     ) -> None:
         self._tmux = tmux_manager
         self._worktree = worktree_manager
@@ -115,6 +132,9 @@ class Orchestrator:
         self._worker_decider = worker_decider
         self._active_signals: Optional[SignalPaths] = None
         self._log_hook = log_hook
+        self._merge_strategy = (
+            merge_strategy if isinstance(merge_strategy, MergeStrategy) else MergeStrategy(str(merge_strategy))
+        )
 
     def set_main_session_hook(self, hook: Optional[Callable[[str], None]]) -> None:
         self._main_session_hook = hook
@@ -271,13 +291,14 @@ class Orchestrator:
             )
 
             selected_info = self._validate_selection(decision, candidates)
-            self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
+            merge_outcome = self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
             artifact.selected_session_id = selected_info.session_id
 
             result = OrchestrationResult(
                 selected_session=selected_info.session_id,
                 sessions_summary=scoreboard,
                 artifact=artifact,
+                merge_outcome=merge_outcome,
             )
 
             log_paths = self._log.record_cycle(
@@ -643,18 +664,36 @@ class Orchestrator:
         *,
         selected: CandidateInfo,
         main_pane: str,
-    ) -> None:
+    ) -> MergeOutcome:
         self._tmux.interrupt_pane(pane_id=main_pane)
+        merge_outcome = MergeOutcome(
+            strategy=self._merge_strategy,
+            status="skipped",
+            branch=selected.branch,
+        )
         if selected.branch and selected.key != "boss":
-            try:
-                self._worktree.merge_into_main(selected.branch)
-            except Exception as exc:  # noqa: BLE001
-                message = f"[merge] ブランチ {selected.branch} のマージに失敗しました: {exc}"
-                if self._log_hook:
-                    try:
-                        self._log_hook(message)
-                    except Exception:
-                        pass
+            if self._merge_strategy == MergeStrategy.AGENT_ONLY:
+                merge_outcome.status = "delegate"
+                merge_outcome.reason = "strategy_agent_only"
+                self._log_merge_delegate(selected.branch, merge_outcome.reason)
+            else:
+                try:
+                    self._worktree.merge_into_main(selected.branch)
+                    merge_outcome.status = "merged"
+                except Exception as exc:  # noqa: BLE001
+                    message = f"[merge] ブランチ {selected.branch} のマージに失敗しました: {exc}"
+                    if self._log_hook:
+                        try:
+                            self._log_hook(message)
+                        except Exception:
+                            pass
+                    merge_outcome.error = str(exc)
+                    if self._merge_strategy == MergeStrategy.FAST_THEN_AGENT:
+                        merge_outcome.status = "delegate"
+                        merge_outcome.reason = "fast_forward_failed"
+                        self._log_merge_delegate(selected.branch, merge_outcome.reason, merge_outcome.error)
+                    else:
+                        merge_outcome.status = "failed"
         if selected.session_id:
             self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
             bind_existing = getattr(self._monitor, "bind_existing_session", None)
@@ -669,6 +708,23 @@ class Orchestrator:
                 consume(selected.session_id)
             except Exception:
                 pass
+        return merge_outcome
+
+    def _log_merge_delegate(self, branch: Optional[str], reason: str, error: Optional[str] = None) -> None:
+        if not self._log_hook:
+            return
+        reason_labels = {
+            "strategy_agent_only": "設定で自動マージを無効化",
+            "fast_forward_failed": "Fast-Forwardの失敗",
+        }
+        label = reason_labels.get(reason, reason)
+        message = f"[merge] ブランチ {branch or 'N/A'} の統合作業をエージェントに委譲します ({label})."
+        if error:
+            message += f" 詳細: {error}"
+        try:
+            self._log_hook(message)
+        except Exception:
+            pass
 
     def _resolve_session_id(self, session_id: Optional[str]) -> Optional[str]:
         if not session_id:

@@ -39,6 +39,15 @@ class LogManager:
                 "sessions_summary": getattr(result, "sessions_summary", None),
             },
         }
+        outcome = getattr(result, "merge_outcome", None)
+        if outcome is not None:
+            payload["result"]["merge_outcome"] = {
+                "strategy": getattr(outcome, "strategy", None).value if getattr(outcome, "strategy", None) else None,
+                "status": getattr(outcome, "status", None),
+                "branch": getattr(outcome, "branch", None),
+                "error": getattr(outcome, "error", None),
+                "reason": getattr(outcome, "reason", None),
+            }
         path = self.cycles_dir / f"{timestamp}.yaml"
         path.write_text(
             yaml.safe_dump(payload, sort_keys=False),
@@ -120,6 +129,20 @@ class LogManager:
                 "selected_key": selected_key,
             }
         )
+
+        outcome = getattr(result, "merge_outcome", None)
+        if outcome is not None:
+            events.append(
+                {
+                    "type": "merge_outcome",
+                    "timestamp": timestamp,
+                    "strategy": getattr(outcome, "strategy", None).value if getattr(outcome, "strategy", None) else None,
+                    "status": getattr(outcome, "status", None),
+                    "branch": getattr(outcome, "branch", None),
+                    "error": getattr(outcome, "error", None),
+                    "reason": getattr(outcome, "reason", None),
+                }
+            )
 
         artifact = getattr(result, "artifact", None)
         if artifact is not None:

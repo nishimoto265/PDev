@@ -679,3 +679,15 @@
   - uv run python dev_test/evening3.py
   result: Good evening for the third time, world!が標準出力に表示され、ログファイルへstart/message_prepared/message_emitted/completeが追記される
   notes: dev_testおよびlogs配下は.gitignore管理のため実装スクリプト本体は未コミット
+- date: '2025-11-09'
+  time_utc: '09:59:46'
+  summary: マージ戦略を切替える/mergeコマンドと結果トラッキングを追加
+  details:
+  - SettingsStoreとSessionConfigにmerge設定を追加し、/merge(別名/marge)でfast_only/agent_only/fast_then_agentを選択できるようにした
+  - OrchestratorへMergeStrategy/MergeOutcomeを導入し、fast-forward成功/失敗/委譲の結果を記録してControllerとログへ伝播
+  - WorkflowRunnerがアウトカムをUIへ表示し、LogManagerはcycleログにmerge_outcomeイベントを追記
+  - テストはbuilder/command/orchestratorワークフローにケースを追加し、uv run pytest(122件)で全通過を確認
+  reproduce:
+  - uv run pytest
+  result: tests 122 passed
+  notes: /merge設定は~/.parallel-dev/config.yamlに永続化され、OSS公開時のデフォルト安全策としてfast_onlyを維持
