@@ -635,3 +635,14 @@
   - uv run pytest
   result: tests 116 passed
   notes: 今後サービス単位での変更が追いやすくなり、関心分離ルールに沿った構造に整理
+- date: '2025-11-09'
+  time_utc: '08:03:27'
+  summary: CLIコマンド定義をcontroller_commandsへ分離
+  details:
+  - CommandSuggestion/CommandOption/CommandSpecEntryとコマンド定義辞書を新モジュールへ抽出し、CLIController本体の責務を軽量化
+  - Textual CLIは新モジュールから型を参照するよう更新し、既存UIロジックに影響を与えずに依存を整理
+  - pytest でフルスイートを再実行し、挙動が変わらないことを確認
+  reproduce:
+  - uv run pytest
+  result: tests 116 passed
+  notes: コマンド周辺のみを独立して編集しやすくなり、追加リファクタの布石が整った
