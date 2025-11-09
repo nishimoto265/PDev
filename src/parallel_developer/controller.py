@@ -21,6 +21,7 @@ import git
 from .controller_commands import CommandOption, CommandSpecEntry, CommandSuggestion, build_command_specs
 from .controller_events import ControllerEventType
 from .controller_flow import WorkerFlowHelper
+from .controller_pause import PauseHelper
 from .controller_history import HistoryManager
 from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision, WorkerDecision
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
@@ -198,7 +199,7 @@ class CLIController:
         self._last_selected_session: Optional[str] = None
         self._active_main_session_id: Optional[str] = None
         self._paused: bool = False
-        self._history = HistoryManager(self)
+        self._history = HistoryManager()
         self._cycle_counter: int = 0
         self._current_cycle_id: Optional[int] = None
         self._cancelled_cycles: Set[int] = set()
@@ -247,6 +248,7 @@ class CLIController:
             boss_mode_cls=BossMode,
         )
         self._worker_flow = WorkerFlowHelper(self, FlowMode)
+        self._pause_helper = PauseHelper(self)
         self._workflow = WorkflowRunner(self)
 
     async def handle_input(self, user_input: str) -> None:
@@ -602,30 +604,7 @@ class CLIController:
         self._emit(ControllerEventType.LOG, {"text": f"tmuxセッション {session_name} の {len(pane_ids)} 個のペインへEscapeを送信しました。"})
 
     def handle_escape(self) -> None:
-        self.broadcast_escape()
-        if not self._paused:
-            self._paused = True
-            self._emit(ControllerEventType.LOG, {"text": "一時停止モードに入りました。追加指示は現在のワーカーペインへ送信されます。"})
-            self._emit_status("一時停止モード")
-            self._emit_pause_state()
-            return
-        if self._running:
-            current_id = self._current_cycle_id
-            if current_id is not None:
-                self._cancelled_cycles.add(current_id)
-            self._current_cycle_id = None
-            self._running = False
-        if self._continue_future and not self._continue_future.done():
-            self._continue_future.set_result("done")
-        if self._continuation_input_future and not self._continuation_input_future.done():
-            self._continuation_input_future.set_result("")
-        self._awaiting_continuation_input = False
-        self._paused = False
-        self._emit(ControllerEventType.LOG, {"text": "現在のサイクルをキャンセルし、前の状態へ戻しました。"})
-        self._emit_status("待機中")
-        self._emit_pause_state()
-        self._perform_revert(silent=True)
-        return
+        self._pause_helper.handle_escape()
     def _tmux_list_panes(self) -> Optional[List[str]]:
         session_name = self._config.tmux_session
         try:
@@ -647,30 +626,7 @@ class CLIController:
         return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
 
     async def _dispatch_paused_instruction(self, instruction: str) -> None:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: self._send_instruction_to_panes(instruction))
-
-    def _send_instruction_to_panes(self, instruction: str) -> None:
-        session_name = self._config.tmux_session
-        pane_ids = self._tmux_list_panes()
-        if pane_ids is None:
-            return
-        if len(pane_ids) <= 2:
-            self._emit(ControllerEventType.LOG, {"text": f"tmuxセッション {session_name} にワーカーペインが見つからず、追加指示を送信できませんでした。"})
-            return
-        worker_panes = pane_ids[2:]
-        for pane_id in worker_panes:
-            subprocess.run(
-                ["tmux", "send-keys", "-t", pane_id, instruction, "Enter"],
-                check=False,
-            )
-        preview = instruction.replace("\n", " ")[:60]
-        if len(instruction) > 60:
-            preview += "..."
-        self._emit(ControllerEventType.LOG, {"text": f"[pause] {len(worker_panes)} ワーカーペインへ追加指示を送信: {preview}"})
-        self._paused = False
-        self._emit_pause_state()
-        self._emit_status("待機中")
+        await self._pause_helper.dispatch_paused_instruction(instruction)
 
     def _record_cycle_snapshot(self, result: OrchestrationResult, cycle_id: int) -> None:
         snapshot = {
