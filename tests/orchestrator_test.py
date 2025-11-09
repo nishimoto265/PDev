@@ -262,6 +262,14 @@ def test_orchestrator_handles_worker_continuation(dependencies):
     # second batch of worker instructions comes from continuation
     continuation_calls = [call for call in tmux.send_instruction_to_pane.call_args_list if "追記して" in call.kwargs.get("instruction", "")]
     assert continuation_calls
+    # prepare_for_instruction is not re-issued during continuation to avoid extra Ctrl+C
+    prepare_calls = [call.kwargs for call in tmux.prepare_for_instruction.call_args_list]
+    assert prepare_calls == [
+        {"pane_id": "pane-main"},
+        {"pane_id": "pane-worker-1"},
+        {"pane_id": "pane-worker-2"},
+        {"pane_id": "pane-worker-3"},
+    ]
     assert result.continue_requested is False
 
 

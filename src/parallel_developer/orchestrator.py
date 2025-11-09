@@ -495,7 +495,6 @@ class Orchestrator:
             if not worker_name or worker_path is None:
                 continue
             completion_flag = signal_flags.get(worker_name)
-            self._tmux.prepare_for_instruction(pane_id=pane_id)
             location_notice = self._worktree_location_notice(custom_path=worker_path)
             continuation = (
                 f"追加指示です。以下の内容を進めてください:\n{trimmed}\n"
