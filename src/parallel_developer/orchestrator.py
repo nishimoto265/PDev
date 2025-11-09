@@ -575,11 +575,12 @@ class Orchestrator:
             worker_name = layout.pane_to_worker[pane_id]
             branch_name = self._worktree.worker_branch(worker_name)
             worktree_path = layout.pane_to_path[pane_id]
+            resolved_session = self._resolve_session_id(session_id) or session_id
             candidates.append(
                 CandidateInfo(
                     key=worker_name,
-                    label=f"{worker_name} (session {session_id})",
-                    session_id=session_id,
+                    label=f"{worker_name} (session {resolved_session})",
+                    session_id=resolved_session,
                     branch=branch_name,
                     worktree=worktree_path,
                 )
@@ -590,11 +591,12 @@ class Orchestrator:
             and self._boss_mode == BossMode.REWRITE
         )
         if include_boss:
+            resolved_boss = self._resolve_session_id(boss_session_id) or boss_session_id
             candidates.append(
                 CandidateInfo(
                     key="boss",
-                    label=f"boss (session {boss_session_id})",
-                    session_id=boss_session_id,
+                    label=f"boss (session {resolved_boss})",
+                    session_id=resolved_boss,
                     branch=self._worktree.boss_branch,
                     worktree=boss_path,
                 )
@@ -639,12 +641,24 @@ class Orchestrator:
                     bind_existing(pane_id=main_pane, session_id=selected.session_id)
                 except Exception:
                     pass
-            consume = getattr(self._monitor, "consume_session_until_eof", None)
-            if callable(consume):
-                try:
-                    consume(selected.session_id)
-                except Exception:
-                    pass
+        consume = getattr(self._monitor, "consume_session_until_eof", None)
+        if callable(consume):
+            try:
+                consume(selected.session_id)
+            except Exception:
+                pass
+
+    def _resolve_session_id(self, session_id: Optional[str]) -> Optional[str]:
+        if not session_id:
+            return session_id
+        refresher = getattr(self._monitor, "refresh_session_id", None)
+        if callable(refresher):
+            try:
+                resolved = refresher(session_id)
+            except Exception:
+                return session_id
+            return resolved or session_id
+        return session_id
 
     # --------------------------------------------------------------------- #
     # Existing helper utilities

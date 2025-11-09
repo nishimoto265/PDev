@@ -381,6 +381,37 @@ def test_orchestrator_does_not_include_boss_in_score_mode(dependencies):
     assert "boss" not in scoreboard
 
 
+def test_orchestrator_refreshes_session_ids(dependencies):
+    monitor = dependencies["monitor"]
+
+    def _refresh(session_id: str) -> str:
+        return session_id if session_id.startswith("resolved-") else f"resolved-{session_id}"
+
+    monitor.refresh_session_id = Mock(side_effect=_refresh)
+
+    orchestrator = Orchestrator(
+        tmux_manager=dependencies["tmux"],
+        worktree_manager=dependencies["worktree"],
+        monitor=monitor,
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        boss_mode=BossMode.REWRITE,
+    )
+
+    orchestrator.run_cycle(
+        dependencies["instruction"],
+        selector=lambda candidates, **_: SelectionDecision(
+            selected_key="boss",
+            scores={candidate.key: 1.0 if candidate.key == "boss" else 0.0 for candidate in candidates},
+        ),
+    )
+
+    scoreboard = dependencies["logger"].record_cycle.call_args.kwargs["result"].sessions_summary
+    assert scoreboard["worker-1"]["session_id"].startswith("resolved-session-worker-1")
+    assert scoreboard["boss"]["session_id"].startswith("resolved-session-boss")
+
+
 def test_boss_instruction_rewrite_mode():
     tmux = Mock()
     worktree = Mock()
