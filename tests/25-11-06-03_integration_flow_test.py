@@ -7,7 +7,7 @@ import pytest
 
 from parallel_developer.controller import CLIController
 from parallel_developer.orchestrator import CandidateInfo, CycleArtifact, CycleLayout, OrchestrationResult
-from parallel_developer.session_manifest import ManifestStore
+from parallel_developer.stores import ManifestStore
 
 
 def _run(coro):

@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Literal
 
-from .settings_store import default_config_dir
+from .stores import default_config_dir
 
 
 class BossMode(str, Enum):

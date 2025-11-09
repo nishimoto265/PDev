@@ -646,3 +646,14 @@
   - uv run pytest
   result: tests 116 passed
   notes: コマンド周辺のみを独立して編集しやすくなり、追加リファクタの布石が整った
+- date: '2025-11-09'
+  time_utc: '08:29:06'
+  summary: Controllerの実行フロー/ストア/イベントまわりを分離
+  details:
+  - WorkerFlowHelperとWorkflowRunnerを追加し、ワーカー完了処理とrun_instructionの長大ロジックを分割
+  - SettingsStore/ManifestStoreをstoresパッケージへ移動し、controller/cli/testsの依存先を更新
+  - ControllerEventTypeを導入してUIとのイベント契約を明示化、Textual側はEnum値でルーティング
+  reproduce:
+  - uv run pytest
+  result: tests 116 passed
+  notes: フロー制御・永続化・イベントの責務が分けられ、残タスクのリファクタでも影響範囲を局所化できる状態になった

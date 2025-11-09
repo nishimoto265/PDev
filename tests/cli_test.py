@@ -15,7 +15,7 @@ import git
 
 from parallel_developer.controller import CLIController, SessionMode, TmuxAttachManager
 from parallel_developer.orchestrator import BossMode, CycleArtifact, OrchestrationResult
-from parallel_developer.session_manifest import ManifestStore, PaneRecord, SessionManifest
+from parallel_developer.stores import ManifestStore, PaneRecord, SessionManifest
 from types import SimpleNamespace
 
 

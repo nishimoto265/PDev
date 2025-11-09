@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set, Mapping, Awaitable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, Mapping, Awaitable, Union
 import platform
 import subprocess
 import shlex
@@ -19,15 +19,21 @@ from subprocess import PIPE
 import git
 
 from .controller_commands import CommandOption, CommandSpecEntry, CommandSuggestion, build_command_specs
+from .controller_events import ControllerEventType
+from .controller_flow import WorkerFlowHelper
 from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision, WorkerDecision
-from .session_manifest import ManifestStore, PaneRecord, SessionManifest, SessionReference
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
-from .settings_store import (
+from .stores import (
+    ManifestStore,
+    PaneRecord,
+    SessionManifest,
+    SessionReference,
     SettingsStore,
     default_config_dir,
     resolve_settings_path,
     resolve_worktree_root,
 )
+from .workflow_runner import WorkflowRunner
 
 def _ensure_logs_directory(identifier: str) -> Path:
     """Create and return the logs directory for the given identifier."""
@@ -241,6 +247,8 @@ class CLIController:
             flow_mode_cls=FlowMode,
             boss_mode_cls=BossMode,
         )
+        self._worker_flow = WorkerFlowHelper(self, FlowMode)
+        self._workflow = WorkflowRunner(self)
 
     async def handle_input(self, user_input: str) -> None:
         raw_text = user_input.rstrip("\n")
@@ -248,10 +256,10 @@ class CLIController:
         if self._awaiting_continuation_input:
             stripped = raw_text.strip()
             if not stripped:
-                self._emit("log", {"text": "追加指示が空です。何をするか具体的に入力してください。"})
+                self._emit(ControllerEventType.LOG, {"text": "追加指示が空です。何をするか具体的に入力してください。"})
                 return
             if stripped.startswith("/"):
-                self._emit("log", {"text": "追加指示入力中です。コマンドではなくテキストで指示を入力してください。"})
+                self._emit(ControllerEventType.LOG, {"text": "追加指示入力中です。コマンドではなくテキストで指示を入力してください。"})
                 return
             self._submit_continuation_instruction(raw_text)
             return
@@ -270,10 +278,10 @@ class CLIController:
         if self._running:
             if self._current_cycle_id and self._current_cycle_id in self._cancelled_cycles:
                 self._queued_instruction = text
-                self._emit("log", {"text": "キャンセル処理中です。完了後にこの指示を実行します。"})
+                self._emit(ControllerEventType.LOG, {"text": "キャンセル処理中です。完了後にこの指示を実行します。"})
                 return
         if self._running:
-            self._emit("log", {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
             return
         self._record_history(text)
         await self._run_instruction(text)
@@ -319,52 +327,52 @@ class CLIController:
     async def execute_command(self, name: str, option: Optional[object] = None) -> None:
         spec = self._command_specs.get(name)
         if spec is None:
-            self._emit("log", {"text": f"未知のコマンドです: {name}"})
+            self._emit(ControllerEventType.LOG, {"text": f"未知のコマンドです: {name}"})
             return
         await spec.handler(option)
 
     async def _cmd_exit(self, option: Optional[object]) -> None:
-        self._emit("quit", {})
+        self._emit(ControllerEventType.QUIT, {})
 
     async def _cmd_help(self, option: Optional[object]) -> None:
         lines = ["利用可能なコマンド:"]
         for name in sorted(self._command_specs.keys()):
             spec = self._command_specs[name]
             lines.append(f"  {name:10s} : {spec.description}")
-        self._emit("log", {"text": "\n".join(lines)})
+        self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
 
     async def _cmd_status(self, option: Optional[object]) -> None:
         self._emit_status("待機中")
 
     async def _cmd_scoreboard(self, option: Optional[object]) -> None:
-        self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
+        self._emit(ControllerEventType.SCOREBOARD, {"scoreboard": self._last_scoreboard})
 
     async def _cmd_done(self, option: Optional[object]) -> None:
         if self._continue_future and not self._continue_future.done():
             self._continue_future.set_result("done")
-            self._emit("log", {"text": "/done を受け付けました。採点フェーズへ移行します。"})
+            self._emit(ControllerEventType.LOG, {"text": "/done を受け付けました。採点フェーズへ移行します。"})
             return
         if self._active_orchestrator:
             count = self._active_orchestrator.force_complete_workers()
             if count:
-                self._emit("log", {"text": f"/done を検知として扱い、{count} ワーカーを完了済みに設定しました。"})
+                self._emit(ControllerEventType.LOG, {"text": f"/done を検知として扱い、{count} ワーカーを完了済みに設定しました。"})
             else:
-                self._emit("log", {"text": "完了扱いにするワーカーセッションが見つかりませんでした。"})
+                self._emit(ControllerEventType.LOG, {"text": "完了扱いにするワーカーセッションが見つかりませんでした。"})
         else:
-            self._emit("log", {"text": "現在進行中のワーカークセッションがないため /done を適用できません。"})
+            self._emit(ControllerEventType.LOG, {"text": "現在進行中のワーカークセッションがないため /done を適用できません。"})
 
     async def _cmd_continue(self, option: Optional[object]) -> None:
         if self._continue_future and not self._continue_future.done():
             self._continue_future.set_result("continue")
-            self._emit("log", {"text": "/continue を受け付けました。追加指示を入力してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "/continue を受け付けました。追加指示を入力してください。"})
         else:
-            self._emit("log", {"text": "/continue は現在利用できません。"})
+            self._emit(ControllerEventType.LOG, {"text": "/continue は現在利用できません。"})
 
     def _await_worker_command(self) -> str:
         future = Future()
         self._continue_future = future
         self._emit(
-            "log",
+            ControllerEventType.LOG,
             {
                 "text": (
                     "ワーカーの処理が完了しました。追加で作業させるには /continue を、"
@@ -383,10 +391,8 @@ class CLIController:
         self._continuation_input_future = future
         self._awaiting_continuation_input = True
         self._emit(
-            "log",
-            {
-                "text": "追加指示を入力してください。完了したらワーカーのフラグ更新を待ちます。"
-            },
+            ControllerEventType.LOG,
+            {"text": "追加指示を入力してください。完了したらワーカーのフラグ更新を待ちます。"},
         )
         try:
             instruction = future.result()
@@ -401,13 +407,13 @@ class CLIController:
         self._awaiting_continuation_input = False
         if future and not future.done():
             future.set_result(instruction.strip())
-            self._emit("log", {"text": "追加指示を受け付けました。ワーカーの完了を待ちます。"})
+            self._emit(ControllerEventType.LOG, {"text": "追加指示を受け付けました。ワーカーの完了を待ちます。"})
 
     async def _cmd_boss(self, option: Optional[object]) -> None:
         if option is None:
             mode = self._config.boss_mode.value
             self._emit(
-                "log",
+                ControllerEventType.LOG,
                 {
                     "text": (
                         "現在の Boss モードは {mode} です。"
@@ -428,11 +434,11 @@ class CLIController:
             await self.handle_input(f"{value}")
             return
         if new_mode == self._config.boss_mode:
-            self._emit("log", {"text": f"Boss モードは既に {new_mode.value} です。"})
+            self._emit(ControllerEventType.LOG, {"text": f"Boss モードは既に {new_mode.value} です。"})
             return
         self._config.boss_mode = new_mode
         self._settings_store.boss = new_mode.value
-        self._emit("log", {"text": f"Boss モードを {new_mode.value} に設定しました。"})
+        self._emit(ControllerEventType.LOG, {"text": f"Boss モードを {new_mode.value} に設定しました。"})
 
     async def _cmd_flow(self, option: Optional[object]) -> None:
         if option is None:
@@ -443,7 +449,7 @@ class CLIController:
             for mode in FlowMode:
                 lines.append(f"  {mode.value:12s} : {self._flow_mode_display(mode)}")
             lines.append("使い方: /flow [manual|auto_review|auto_select|full_auto]")
-            self._emit("log", {"text": "\n".join(lines)})
+            self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
             return
 
         token = str(option).strip().lower().replace("-", "_")
@@ -451,43 +457,43 @@ class CLIController:
         new_mode = mapping.get(token)
         if new_mode is None:
             self._emit(
-                "log",
+                ControllerEventType.LOG,
                 {"text": "使い方: /flow [manual|auto_review|auto_select|full_auto]"},
             )
             return
         if new_mode == getattr(self, "_flow_mode", FlowMode.MANUAL):
-            self._emit("log", {"text": f"フローモードは既に {self._flow_mode_display(new_mode)} です。"})
+            self._emit(ControllerEventType.LOG, {"text": f"フローモードは既に {self._flow_mode_display(new_mode)} です。"})
             return
 
         self._flow_mode = new_mode
         self._config.flow_mode = new_mode
         self._settings_store.flow = new_mode.value
-        self._emit("log", {"text": f"フローモードを {self._flow_mode_display(new_mode)} に設定しました。"})
+        self._emit(ControllerEventType.LOG, {"text": f"フローモードを {self._flow_mode_display(new_mode)} に設定しました。"})
         self._emit_status("待機中")
 
     async def _cmd_attach(self, option: Optional[object]) -> None:
         mode = str(option).lower() if option is not None else None
         if mode in {"auto", "manual"}:
             self._attach_mode = mode
-            self._emit("log", {"text": f"/attach モードを {mode} に設定しました。"})
+            self._emit(ControllerEventType.LOG, {"text": f"/attach モードを {mode} に設定しました。"})
             self._settings_store.attach = mode
             return
         if mode == "now" or option is None:
             await self._handle_attach_command(force=True)
             return
-        self._emit("log", {"text": "使い方: /attach [auto|manual|now]"})
+        self._emit(ControllerEventType.LOG, {"text": "使い方: /attach [auto|manual|now]"})
 
     async def _cmd_parallel(self, option: Optional[object]) -> None:
         if option is None:
-            self._emit("log", {"text": "使い方: /parallel <ワーカー数>"})
+            self._emit(ControllerEventType.LOG, {"text": "使い方: /parallel <ワーカー数>"})
             return
         try:
             value = int(str(option))
         except ValueError:
-            self._emit("log", {"text": "ワーカー数は数字で指定してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "ワーカー数は数字で指定してください。"})
             return
         if value < 1:
-            self._emit("log", {"text": "ワーカー数は1以上で指定してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "ワーカー数は1以上で指定してください。"})
             return
         self._config.worker_count = value
         self._settings_store.parallel = str(value)
@@ -496,7 +502,7 @@ class CLIController:
     async def _cmd_mode(self, option: Optional[object]) -> None:
         mode = str(option).lower() if option is not None else None
         if mode not in {"main", "parallel"}:
-            self._emit("log", {"text": "使い方: /mode main | /mode parallel"})
+            self._emit(ControllerEventType.LOG, {"text": "使い方: /mode main | /mode parallel"})
             return
         self._config.mode = SessionMode(mode)
         self._settings_store.mode = mode
@@ -515,14 +521,14 @@ class CLIController:
             except ValueError:
                 index = self._find_resume_index_by_session(str(option))
         if index is None:
-            self._emit("log", {"text": "指定されたセッションが見つかりません。"})
+            self._emit(ControllerEventType.LOG, {"text": "指定されたセッションが見つかりません。"})
             return
         self._load_session(index)
 
     async def _cmd_log(self, option: Optional[object]) -> None:
         if option is None:
             self._emit(
-                "log",
+                ControllerEventType.LOG,
                 {
                     "text": "使い方: /log copy | /log save <path>\n"
                     "  copy : 現在のログをクリップボードへコピー\n"
@@ -540,15 +546,15 @@ class CLIController:
         else:
             action = str(option).lower()
         if action == "copy":
-            self._emit("log_copy", {})
+            self._emit(ControllerEventType.LOG_COPY, {})
             return
         if action == "save":
             if not argument:
-                self._emit("log", {"text": "保存先パスを指定してください。例: /log save logs/output.log"})
+                self._emit(ControllerEventType.LOG, {"text": "保存先パスを指定してください。例: /log save logs/output.log"})
                 return
-            self._emit("log_save", {"path": argument})
+            self._emit(ControllerEventType.LOG_SAVE, {"path": argument})
             return
-        self._emit("log", {"text": "使い方: /log copy | /log save <path>"})
+        self._emit(ControllerEventType.LOG, {"text": "使い方: /log copy | /log save <path>"})
 
     async def _cmd_commit(self, option: Optional[object]) -> None:
         mode = "manual"
@@ -563,14 +569,14 @@ class CLIController:
             if self._auto_commit_enabled:
                 self._auto_commit_enabled = False
                 self._settings_store.commit = "manual"
-                self._emit("log", {"text": "自動コミットを無効にしました。"})
+                self._emit(ControllerEventType.LOG, {"text": "自動コミットを無効にしました。"})
             else:
                 self._auto_commit_enabled = True
                 self._settings_store.commit = "auto"
-                self._emit("log", {"text": "自動コミットを有効にしました。"})
+                self._emit(ControllerEventType.LOG, {"text": "自動コミットを有効にしました。"})
                 self._perform_commit(auto=True, quiet_when_no_change=True)
             return
-        self._emit("log", {"text": "/commit は manual または auto を指定してください。"})
+        self._emit(ControllerEventType.LOG, {"text": "/commit は manual または auto を指定してください。"})
 
     def _find_resume_index_by_session(self, token: str) -> Optional[int]:
         if not self._resume_options:
@@ -586,7 +592,7 @@ class CLIController:
         if pane_ids is None:
             return
         if not pane_ids:
-            self._emit("log", {"text": f"tmuxセッション {session_name} にペインが見つかりませんでした。"})
+            self._emit(ControllerEventType.LOG, {"text": f"tmuxセッション {session_name} にペインが見つかりませんでした。"})
             return
 
         for pane_id in pane_ids:
@@ -594,13 +600,13 @@ class CLIController:
                 ["tmux", "send-keys", "-t", pane_id, "Escape"],
                 check=False,
             )
-        self._emit("log", {"text": f"tmuxセッション {session_name} の {len(pane_ids)} 個のペインへEscapeを送信しました。"})
+        self._emit(ControllerEventType.LOG, {"text": f"tmuxセッション {session_name} の {len(pane_ids)} 個のペインへEscapeを送信しました。"})
 
     def handle_escape(self) -> None:
         self.broadcast_escape()
         if not self._paused:
             self._paused = True
-            self._emit("log", {"text": "一時停止モードに入りました。追加指示は現在のワーカーペインへ送信されます。"})
+            self._emit(ControllerEventType.LOG, {"text": "一時停止モードに入りました。追加指示は現在のワーカーペインへ送信されます。"})
             self._emit_status("一時停止モード")
             self._emit_pause_state()
             return
@@ -616,7 +622,7 @@ class CLIController:
             self._continuation_input_future.set_result("")
         self._awaiting_continuation_input = False
         self._paused = False
-        self._emit("log", {"text": "現在のサイクルをキャンセルし、前の状態へ戻しました。"})
+        self._emit(ControllerEventType.LOG, {"text": "現在のサイクルをキャンセルし、前の状態へ戻しました。"})
         self._emit_status("待機中")
         self._emit_pause_state()
         self._perform_revert(silent=True)
@@ -632,12 +638,12 @@ class CLIController:
                 text=True,
             )
         except FileNotFoundError:
-            self._emit("log", {"text": "tmux コマンドが見つかりません。tmuxがインストールされているか確認してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "tmux コマンドが見つかりません。tmuxがインストールされているか確認してください。"})
             return None
         if result.returncode != 0:
             message = (result.stderr or result.stdout or "").strip()
             if message:
-                self._emit("log", {"text": f"tmux list-panes に失敗しました: {message}"})
+                self._emit(ControllerEventType.LOG, {"text": f"tmux list-panes に失敗しました: {message}"})
             return None
         return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
 
@@ -651,7 +657,7 @@ class CLIController:
         if pane_ids is None:
             return
         if len(pane_ids) <= 2:
-            self._emit("log", {"text": f"tmuxセッション {session_name} にワーカーペインが見つからず、追加指示を送信できませんでした。"})
+            self._emit(ControllerEventType.LOG, {"text": f"tmuxセッション {session_name} にワーカーペインが見つからず、追加指示を送信できませんでした。"})
             return
         worker_panes = pane_ids[2:]
         for pane_id in worker_panes:
@@ -662,7 +668,7 @@ class CLIController:
         preview = instruction.replace("\n", " ")[:60]
         if len(instruction) > 60:
             preview += "..."
-        self._emit("log", {"text": f"[pause] {len(worker_panes)} ワーカーペインへ追加指示を送信: {preview}"})
+        self._emit(ControllerEventType.LOG, {"text": f"[pause] {len(worker_panes)} ワーカーペインへ追加指示を送信: {preview}"})
         self._paused = False
         self._emit_pause_state()
         self._emit_status("待機中")
@@ -682,20 +688,7 @@ class CLIController:
         completion_info: Mapping[str, Any],
         layout: CycleLayout,
     ) -> WorkerDecision:
-        if getattr(self, "_flow_mode", FlowMode.MANUAL) in {FlowMode.AUTO_REVIEW, FlowMode.FULL_AUTO}:
-            self._emit(
-                "log",
-                {
-                    "text": f"[flow {self._flow_mode_display()}] ワーカーの処理が完了しました。採点フェーズへ進みます。",
-                },
-            )
-            return WorkerDecision(action="done")
-
-        command = self._await_worker_command()
-        if str(command).lower() == "continue":
-            instruction = self._await_continuation_instruction()
-            return WorkerDecision(action="continue", instruction=instruction)
-        return WorkerDecision(action="done")
+        return self._worker_flow.handle_worker_decision(fork_map, completion_info, layout)
 
     def _record_history(self, text: str) -> None:
         entry = text.strip()
@@ -711,18 +704,18 @@ class CLIController:
         try:
             repo = git.Repo(self._worktree_root)
         except git.exc.InvalidGitRepositoryError:
-            self._emit("log", {"text": "Gitリポジトリが存在しません。`git init` を実行してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "Gitリポジトリが存在しません。`git init` を実行してください。"})
             return False
 
         if not repo.is_dirty(untracked_files=True):
             if not quiet_when_no_change:
-                self._emit("log", {"text": "コミット対象の変更がありません。"})
+                self._emit(ControllerEventType.LOG, {"text": "コミット対象の変更がありません。"})
             return False
 
         try:
             repo.git.add(A=True)
         except Exception as exc:  # noqa: BLE001
-            self._emit("log", {"text": f"git add に失敗しました: {exc}"})
+            self._emit(ControllerEventType.LOG, {"text": f"git add に失敗しました: {exc}"})
             return False
 
         prefix = "pdev-auto-save" if auto else "pdev-manual-save"
@@ -730,10 +723,10 @@ class CLIController:
         try:
             repo.index.commit(message)
         except Exception as exc:  # noqa: BLE001
-            self._emit("log", {"text": f"コミットに失敗しました: {exc}"})
+            self._emit(ControllerEventType.LOG, {"text": f"コミットに失敗しました: {exc}"})
             return False
 
-        self._emit("log", {"text": f"変更をコミットしました: {message}"})
+        self._emit(ControllerEventType.LOG, {"text": f"変更をコミットしました: {message}"})
         return True
 
     def _maybe_auto_commit(self) -> None:
@@ -780,7 +773,7 @@ class CLIController:
         selected_candidate = candidate_map.get(decision.selected_key)
         label = selected_candidate.label if selected_candidate else decision.selected_key
         self._emit(
-            "log",
+            ControllerEventType.LOG,
             {
                 "text": f"[flow {mode.value}] {label} を自動選択しました。",
             },
@@ -893,7 +886,7 @@ class CLIController:
                     tmux_manager.launch_main_session(pane_id=main_pane)
             summary = session_id or "(未選択)"
             if not silent:
-                self._emit("log", {"text": f"前回のセッションを再開しました。次の指示はセッション {summary} から再開します。"})
+                self._emit(ControllerEventType.LOG, {"text": f"前回のセッションを再開しました。次の指示はセッション {summary} から再開します。"})
                 self._emit_status("待機中")
                 self._emit_pause_state()
             self._pre_cycle_selected_session = None
@@ -908,7 +901,7 @@ class CLIController:
         self._last_scoreboard = snapshot.get("scoreboard", {})
         self._last_instruction = snapshot.get("instruction")
         if self._last_scoreboard:
-            self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
+            self._emit(ControllerEventType.SCOREBOARD, {"scoreboard": self._last_scoreboard})
 
         self._paused = False
         if tmux_manager and main_pane:
@@ -919,14 +912,14 @@ class CLIController:
 
         summary = session_id or "(未選択)"
         if not silent:
-            self._emit("log", {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
+            self._emit(ControllerEventType.LOG, {"text": f"サイクルを巻き戻しました。次の指示はセッション {summary} から再開します。"})
             self._emit_status("待機中")
             self._emit_pause_state()
         self._pre_cycle_selected_session = None
         self._pre_cycle_selected_session_set = False
 
     def _emit_pause_state(self) -> None:
-        self._emit("pause_state", {"paused": self._paused})
+        self._emit(ControllerEventType.PAUSE_STATE, {"paused": self._paused})
 
     def _on_main_session_started(self, session_id: str) -> None:
         self._active_main_session_id = session_id
@@ -936,123 +929,15 @@ class CLIController:
         self._config.reuse_existing_session = True
 
     async def _run_instruction(self, instruction: str) -> None:
-        if self._running:
-            self._emit("log", {"text": "別の指示を処理中です。完了を待ってから再度実行してください。"})
-            return
-        if self._selection_context:
-            self._emit("log", {"text": "候補選択待ちです。/pick <n> で選択してください。"})
-            return
-
-        self._maybe_auto_commit()
-
-        self._cycle_counter += 1
-        cycle_id = self._cycle_counter
-        self._current_cycle_id = cycle_id
-        self._running = True
-        self._emit_status("メインセッションを準備中...")
-        self._active_main_session_id = None
-        self._pre_cycle_selected_session = self._last_selected_session
-        self._pre_cycle_selected_session_set = True
-
-        logs_dir = self._create_cycle_logs_dir()
-
-        orchestrator = self._builder(
-            worker_count=self._config.worker_count,
-            log_dir=logs_dir,
-            session_name=self._config.tmux_session,
-            reuse_existing_session=self._config.reuse_existing_session,
-            session_namespace=self._session_namespace,
-            boss_mode=self._config.boss_mode,
-            project_root=self._worktree_root,
-            worktree_storage_root=self._worktree_storage_root,
-        )
-        self._active_orchestrator = orchestrator
-        self._last_tmux_manager = getattr(orchestrator, "_tmux", None)
-        main_hook = getattr(orchestrator, "set_main_session_hook", None)
-        if callable(main_hook):
-            main_hook(self._on_main_session_started)
-        worker_decider = getattr(orchestrator, "set_worker_decider", None)
-        if callable(worker_decider):
-            worker_decider(self._handle_worker_decision)
-
-        loop = asyncio.get_running_loop()
-
-        def selector(
-            candidates: List[CandidateInfo],
-            scoreboard: Optional[Dict[str, Dict[str, object]]] = None,
-        ) -> SelectionDecision:
-            return self._select_candidates(candidates, scoreboard)
-
-        resume_session = self._last_selected_session
-
-        def run_cycle() -> OrchestrationResult:
-            return orchestrator.run_cycle(
-                instruction,
-                selector=selector,
-                resume_session_id=resume_session,
-            )
-
-        auto_attach_task: Optional[asyncio.Task[None]] = None
-        cancelled = False
-        try:
-            self._emit("log", {"text": f"指示を開始: {instruction}"})
-            if self._attach_mode == "auto":
-                auto_attach_task = asyncio.create_task(self._handle_attach_command(force=False))
-            result: OrchestrationResult = await loop.run_in_executor(None, run_cycle)
-            if cycle_id in self._cancelled_cycles:
-                cancelled = True
-                self._cancelled_cycles.discard(cycle_id)
-            else:
-                self._last_scoreboard = dict(result.sessions_summary)
-                self._last_instruction = instruction
-                self._last_selected_session = result.selected_session
-                self._active_main_session_id = result.selected_session
-                self._config.reuse_existing_session = True
-                self._emit("scoreboard", {"scoreboard": self._last_scoreboard})
-                self._emit("log", {"text": "指示が完了しました。"})
-                if result.artifact:
-                    manifest = self._build_manifest(result, logs_dir)
-                    self._manifest_store.save_manifest(manifest)
-                    self._emit("log", {"text": f"セッションを保存しました: {manifest.session_id}"})
-                self._record_cycle_snapshot(result, cycle_id)
-        except Exception as exc:  # pylint: disable=broad-except
-            self._emit("log", {"text": f"エラーが発生しました: {exc}"})
-        finally:
-            self._selection_context = None
-            if self._current_cycle_id == cycle_id:
-                self._current_cycle_id = None
-            self._running = False
-            self._awaiting_continuation_input = False
-            if self._continuation_input_future and not self._continuation_input_future.done():
-                self._continuation_input_future.set_result("")
-            self._continuation_input_future = None
-            if cancelled:
-                self._emit_status("待機中")
-                self._emit_pause_state()
-                self._perform_revert(silent=True)
-            else:
-                self._emit_status("一時停止中" if self._paused else "待機中")
-                self._emit_pause_state()
-            if auto_attach_task:
-                try:
-                    await auto_attach_task
-                except Exception:  # noqa: BLE001
-                    pass
-            self._pre_cycle_selected_session = None
-            self._pre_cycle_selected_session_set = False
-
-        if cancelled and self._queued_instruction:
-            queued = self._queued_instruction
-            self._queued_instruction = None
-            await self._run_instruction(queued)
+        await self._workflow.run(instruction)
 
     def _resolve_selection(self, index: int) -> None:
         if not self._selection_context:
-            self._emit("log", {"text": "現在選択待ちではありません。"})
+            self._emit(ControllerEventType.LOG, {"text": "現在選択待ちではありません。"})
             return
         context = self._selection_context
         if index < 1 or index > len(context.candidates):
-            self._emit("log", {"text": "無効な番号です。"})
+            self._emit(ControllerEventType.LOG, {"text": "無効な番号です。"})
             return
         candidate = context.candidates[index - 1]
         scores = {
@@ -1060,26 +945,26 @@ class CLIController:
         }
         decision = SelectionDecision(selected_key=candidate.key, scores=scores)
         context.future.set_result(decision)
-        self._emit("log", {"text": f"{candidate.label} を選択しました。"})
+        self._emit(ControllerEventType.LOG, {"text": f"{candidate.label} を選択しました。"})
         self._selection_context = None
-        self._emit("selection_finished", {})
+        self._emit(ControllerEventType.SELECTION_FINISHED, {})
 
     async def _handle_attach_command(self, *, force: bool = False) -> None:
         session_name = self._config.tmux_session
         wait_for_session = not force and self._attach_mode == "auto"
         if wait_for_session:
-            self._emit("log", {"text": f"[auto] tmuxセッション {session_name} の起動を待機中..."})
+            self._emit(ControllerEventType.LOG, {"text": f"[auto] tmuxセッション {session_name} の起動を待機中..."})
             session_ready = await self._wait_for_session(session_name)
             if not session_ready:
                 self._emit(
-                    "log",
+                    ControllerEventType.LOG,
                     {"text": f"[auto] tmuxセッション {session_name} が見つかりませんでした。少し待ってから再度試してください。"},
                 )
                 return
         else:
             if not self._attach_manager.session_exists(session_name):
                 self._emit(
-                    "log",
+                    ControllerEventType.LOG,
                     {
                         "text": (
                             f"tmuxセッション {session_name} がまだ存在しません。"
@@ -1093,16 +978,16 @@ class CLIController:
         if perform_detection:
             if self._attach_manager.is_attached(session_name):
                 self._emit(
-                    "log",
+                    ControllerEventType.LOG,
                     {"text": f"[auto] tmuxセッション {session_name} は既に接続済みのため、自動アタッチをスキップしました。"},
                 )
                 return
         result = self._attach_manager.attach(session_name, workdir=self._worktree_root)
         if result.returncode == 0:
             prefix = "[auto] " if perform_detection else ""
-            self._emit("log", {"text": f"{prefix}tmuxセッション {session_name} に接続しました。"})
+            self._emit(ControllerEventType.LOG, {"text": f"{prefix}tmuxセッション {session_name} に接続しました。"})
         else:
-            self._emit("log", {"text": "tmuxへの接続に失敗しました。tmuxが利用可能か確認してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "tmuxへの接続に失敗しました。tmuxが利用可能か確認してください。"})
 
     def _build_resume_options(self) -> List[CommandOption]:
         references = self._manifest_store.list_sessions()
@@ -1120,7 +1005,7 @@ class CLIController:
         references = self._manifest_store.list_sessions()
         self._resume_options = references
         if not references:
-            self._emit("log", {"text": "保存済みセッションが見つかりません。"})
+            self._emit(ControllerEventType.LOG, {"text": "保存済みセッションが見つかりません。"})
             return
         lines = [
             "=== 保存されたセッション ===",
@@ -1132,26 +1017,26 @@ class CLIController:
             )
             if summary:
                 lines.append(f"   last instruction: {summary[:80]}")
-        self._emit("log", {"text": "\n".join(lines)})
-        self._emit("log", {"text": "再開するには /resume からセッションを選択してください。"})
+        self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
+        self._emit(ControllerEventType.LOG, {"text": "再開するには /resume からセッションを選択してください。"})
 
     def _load_session(self, index: int) -> None:
         if not self._resume_options:
-            self._emit("log", {"text": "先に /resume で一覧を表示してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "先に /resume で一覧を表示してください。"})
             return
         if index < 1 or index > len(self._resume_options):
-            self._emit("log", {"text": "無効な番号です。"})
+            self._emit(ControllerEventType.LOG, {"text": "無効な番号です。"})
             return
         reference = self._resume_options[index - 1]
         try:
             manifest = self._manifest_store.load_manifest(reference.session_id)
         except FileNotFoundError:
-            self._emit("log", {"text": "セッションファイルが見つかりませんでした。"})
+            self._emit(ControllerEventType.LOG, {"text": "セッションファイルが見つかりませんでした。"})
             return
         self._apply_manifest(manifest)
-        self._emit("log", {"text": f"セッション {manifest.session_id} を読み込みました。"})
+        self._emit(ControllerEventType.LOG, {"text": f"セッション {manifest.session_id} を読み込みました。"})
         if manifest.scoreboard:
-            self._emit("scoreboard", {"scoreboard": manifest.scoreboard})
+            self._emit(ControllerEventType.SCOREBOARD, {"scoreboard": manifest.scoreboard})
         self._show_conversation_log(manifest.conversation_log)
 
     def _apply_manifest(self, manifest: SessionManifest) -> None:
@@ -1175,7 +1060,7 @@ class CLIController:
         try:
             import libtmux
         except ImportError:
-            self._emit("log", {"text": "libtmux が見つかりません。tmux セッションは手動で復元してください。"})
+            self._emit(ControllerEventType.LOG, {"text": "libtmux が見つかりません。tmux セッションは手動で復元してください。"})
             return
 
         server = libtmux.Server()  # type: ignore[attr-defined]
@@ -1224,11 +1109,11 @@ class CLIController:
 
     def _show_conversation_log(self, log_path: Optional[str]) -> None:
         if not log_path:
-            self._emit("log", {"text": "会話ログはありません。"})
+            self._emit(ControllerEventType.LOG, {"text": "会話ログはありません。"})
             return
         path = Path(log_path)
         if not path.exists():
-            self._emit("log", {"text": "会話ログが見つかりませんでした。"})
+            self._emit(ControllerEventType.LOG, {"text": "会話ログが見つかりませんでした。"})
             return
         lines: List[str] = ["--- Conversation Log ---"]
         try:
@@ -1267,13 +1152,17 @@ class CLIController:
         except json.JSONDecodeError:
             lines.extend(path.read_text(encoding="utf-8").splitlines())
         lines.append("--- End Conversation Log ---")
-        self._emit("log", {"text": "\n".join(lines)})
+        self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
 
     def _emit_status(self, message: str) -> None:
-        self._emit("status", {"message": message})
+        self._emit(ControllerEventType.STATUS, {"message": message})
 
-    def _emit(self, event_type: str, payload: Dict[str, object]) -> None:
-        self._event_handler(event_type, payload)
+    def _emit(self, event_type: Union[str, ControllerEventType], payload: Dict[str, object]) -> None:
+        if isinstance(event_type, ControllerEventType):
+            key = event_type.value
+        else:
+            key = event_type
+        self._event_handler(key, payload)
 
     def _flow_mode_display(self, mode: Optional[FlowMode] = None) -> str:
         current = mode or getattr(self, "_flow_mode", FlowMode.MANUAL)

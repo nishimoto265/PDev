@@ -21,7 +21,8 @@ from textual.widgets.option_list import Option
 
 from .controller import CLIController, SessionMode, build_orchestrator
 from .controller_commands import CommandOption, CommandSuggestion
-from .session_manifest import ManifestStore
+from .controller_events import ControllerEventType
+from .stores import ManifestStore
 from .ui.widgets import (
     CommandHint,
     CommandPalette,
@@ -256,27 +257,28 @@ class ParallelDeveloperApp(App):
 
     def on_controller_event(self, event: ControllerEvent) -> None:
         event.stop()
-        if event.event_type == "status" and self.status_panel:
+        etype = event.event_type
+        if etype == ControllerEventType.STATUS.value and self.status_panel:
             message = event.payload.get("message", "")
             self.status_panel.update_status(self.controller._config, str(message))
-        elif event.event_type == "log" and self.log_panel:
+        elif etype == ControllerEventType.LOG.value and self.log_panel:
             text = str(event.payload.get("text", ""))
             self.log_panel.log(text)
-        elif event.event_type == "scoreboard":
+        elif etype == ControllerEventType.SCOREBOARD.value:
             scoreboard = event.payload.get("scoreboard", {})
             if isinstance(scoreboard, dict):
                 self._render_scoreboard(scoreboard)
-        elif event.event_type == "log_copy":
+        elif etype == ControllerEventType.LOG_COPY.value:
             message = self._copy_log_to_clipboard()
             self._notify_status(message)
-        elif event.event_type == "log_save":
+        elif etype == ControllerEventType.LOG_SAVE.value:
             destination = str(event.payload.get("path", "") or "").strip()
             if not destination:
                 self._notify_status("保存先パスが指定されていません。")
             else:
                 message = self._save_log_to_path(destination)
                 self._notify_status(message)
-        elif event.event_type == "pause_state":
+        elif etype == ControllerEventType.PAUSE_STATE.value:
             paused = bool(event.payload.get("paused", False))
             if self.status_panel:
                 self.status_panel.set_class(paused, "paused")
@@ -289,7 +291,7 @@ class ParallelDeveloperApp(App):
             if self.command_hint:
                 self.command_hint.set_class(paused, "paused")
                 self.command_hint.update_hint(paused)
-        elif event.event_type == "selection_request":
+        elif etype == ControllerEventType.SELECTION_REQUEST.value:
             candidates = event.payload.get("candidates", [])
             scoreboard = event.payload.get("scoreboard", {})
             self._render_scoreboard(scoreboard)
@@ -307,13 +309,13 @@ class ParallelDeveloperApp(App):
                     pass
             if self.command_input:
                 self.command_input.display = False
-        elif event.event_type == "selection_finished":
+        elif etype == ControllerEventType.SELECTION_FINISHED.value:
             if self.selection_list:
                 self.selection_list.display = False
             if self.command_input:
                 self.command_input.display = True
                 self.command_input.focus()
-        elif event.event_type == "quit":
+        elif etype == ControllerEventType.QUIT.value:
             self.exit()
 
     async def action_quit(self) -> None:  # type: ignore[override]

@@ -6,7 +6,7 @@ import pytest
 
 from parallel_developer.controller import CLIController, FlowMode
 from parallel_developer.orchestrator import CandidateInfo, CycleArtifact, CycleLayout, OrchestrationResult, BossMode
-from parallel_developer.session_manifest import ManifestStore
+from parallel_developer.stores import ManifestStore
 
 
 def _run(coro):

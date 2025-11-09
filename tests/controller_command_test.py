@@ -7,8 +7,7 @@ import yaml
 
 from parallel_developer.controller import CLIController, FlowMode
 from parallel_developer.orchestrator import BossMode, CandidateInfo, OrchestrationResult
-from parallel_developer.session_manifest import PaneRecord, SessionManifest, SessionReference
-from parallel_developer.settings_store import SettingsStore
+from parallel_developer.stores import PaneRecord, SessionManifest, SessionReference, SettingsStore
 
 
 def _run(coro):
