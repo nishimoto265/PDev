@@ -21,6 +21,7 @@ import git
 from .controller_commands import CommandOption, CommandSpecEntry, CommandSuggestion, build_command_specs
 from .controller_events import ControllerEventType
 from .controller_flow import WorkerFlowHelper
+from .controller_history import HistoryManager
 from .orchestrator import BossMode, CandidateInfo, CycleLayout, OrchestrationResult, Orchestrator, SelectionDecision, WorkerDecision
 from .services import CodexMonitor, LogManager, TmuxLayoutManager, WorktreeManager
 from .stores import (
@@ -197,9 +198,7 @@ class CLIController:
         self._last_selected_session: Optional[str] = None
         self._active_main_session_id: Optional[str] = None
         self._paused: bool = False
-        self._cycle_history: List[Dict[str, object]] = []
-        self._input_history: List[str] = []
-        self._history_cursor: int = 0
+        self._history = HistoryManager(self)
         self._cycle_counter: int = 0
         self._current_cycle_id: Optional[int] = None
         self._cancelled_cycles: Set[int] = set()
@@ -680,7 +679,7 @@ class CLIController:
             "scoreboard": dict(result.sessions_summary),
             "instruction": self._last_instruction,
         }
-        self._cycle_history.append(snapshot)
+        self._history.record_cycle_snapshot(result, cycle_id, self._last_instruction)
 
     def _handle_worker_decision(
         self,
@@ -691,14 +690,7 @@ class CLIController:
         return self._worker_flow.handle_worker_decision(fork_map, completion_info, layout)
 
     def _record_history(self, text: str) -> None:
-        entry = text.strip()
-        if not entry:
-            return
-        if self._input_history and self._input_history[-1] == entry:
-            self._history_cursor = len(self._input_history)
-            return
-        self._input_history.append(entry)
-        self._history_cursor = len(self._input_history)
+        self._history.record_input(text)
 
     def _perform_commit(self, *, auto: bool, quiet_when_no_change: bool) -> bool:
         try:
@@ -843,30 +835,21 @@ class CLIController:
         return filtered, trimmed
 
     def history_previous(self) -> Optional[str]:
-        if not self._input_history:
-            return None
-        if self._history_cursor > 0:
-            self._history_cursor -= 1
-        return self._input_history[self._history_cursor]
+        return self._history.history_previous()
 
     def history_next(self) -> Optional[str]:
-        if not self._input_history:
-            return None
-        if self._history_cursor < len(self._input_history) - 1:
-            self._history_cursor += 1
-            return self._input_history[self._history_cursor]
-        self._history_cursor = len(self._input_history)
-        return ""
+        return self._history.history_next()
 
     def history_reset(self) -> None:
-        self._history_cursor = len(self._input_history)
+        self._history.reset_cursor()
 
     def _perform_revert(self, silent: bool = False) -> None:
         tmux_manager = self._last_tmux_manager
         pane_ids = self._tmux_list_panes() or []
         main_pane = pane_ids[0] if pane_ids else None
 
-        if not self._cycle_history:
+        snapshot = self._history.last_snapshot()
+        if snapshot is None:
             session_id: Optional[str]
             if self._pre_cycle_selected_session_set and self._pre_cycle_selected_session:
                 session_id = self._pre_cycle_selected_session
@@ -893,7 +876,7 @@ class CLIController:
             self._pre_cycle_selected_session_set = False
             return
 
-        snapshot = self._cycle_history[-1]
+        snapshot = self._history.last_snapshot() or {}
         session_id = snapshot.get("selected_session") or self._active_main_session_id or self._last_started_main_session_id
 
         self._last_selected_session = session_id
