@@ -874,6 +874,8 @@ class CLIController:
         candidates: List[CandidateInfo],
         scoreboard: Optional[Dict[str, Dict[str, object]]] = None,
     ) -> SelectionDecision:
+        candidates, scoreboard = self._prune_boss_candidates(candidates, scoreboard)
+
         mode = getattr(self, "_flow_mode", FlowMode.MANUAL)
         if mode in {FlowMode.MANUAL, FlowMode.AUTO_REVIEW}:
             future = self._request_selection(candidates, scoreboard)
@@ -943,6 +945,19 @@ class CLIController:
                 comments[candidate.key] = comment_value
 
         return SelectionDecision(selected_key=selected_key, scores=scores, comments=comments)
+
+    def _prune_boss_candidates(
+        self,
+        candidates: List[CandidateInfo],
+        scoreboard: Optional[Dict[str, Dict[str, object]]],
+    ) -> tuple[List[CandidateInfo], Optional[Dict[str, Dict[str, object]]]]:
+        if self._config.boss_mode == BossMode.REWRITE:
+            return candidates, scoreboard
+        filtered = [candidate for candidate in candidates if candidate.key != "boss"]
+        if not scoreboard or "boss" not in scoreboard:
+            return filtered, scoreboard
+        trimmed = {key: value for key, value in scoreboard.items() if key != "boss"}
+        return filtered, trimmed
 
     def history_previous(self) -> Optional[str]:
         if not self._input_history:

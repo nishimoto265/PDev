@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from parallel_developer.controller import CLIController, FlowMode
-from parallel_developer.orchestrator import BossMode, OrchestrationResult
+from parallel_developer.orchestrator import BossMode, CandidateInfo, OrchestrationResult
 from parallel_developer.session_manifest import PaneRecord, SessionManifest, SessionReference
 
 
@@ -148,6 +148,23 @@ def test_log_command_copy_and_save(controller, event_recorder, tmp_path, monkeyp
     events.clear()
     _run(controller.execute_command("/log", "save"))
     assert any("保存先" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_prune_boss_candidates_for_non_rewrite(controller):
+    controller._config.boss_mode = BossMode.SCORE
+    candidates = [
+        CandidateInfo(key="worker-1", label="worker-1", session_id="s1", branch="b1", worktree=Path("/tmp/w1")),
+        CandidateInfo(key="boss", label="boss", session_id="sb", branch="bb", worktree=Path("/tmp/b")),
+    ]
+    scoreboard = {
+        "worker-1": {"score": 80, "comment": "ok"},
+        "boss": {"score": 95, "comment": "rewrite"},
+    }
+
+    filtered, filtered_scoreboard = controller._prune_boss_candidates(candidates, scoreboard)
+
+    assert all(candidate.key != "boss" for candidate in filtered)
+    assert filtered_scoreboard is not None and "boss" not in filtered_scoreboard
 
 
 def test_resume_command_lists_and_loads(tmp_path, event_recorder):
