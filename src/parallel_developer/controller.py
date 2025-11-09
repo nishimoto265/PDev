@@ -451,12 +451,7 @@ class CLIController:
     async def _cmd_continue(self, option: Optional[object]) -> None:
         if self._continue_future and not self._continue_future.done():
             self._continue_future.set_result(True)
-            self._emit(
-                "log",
-                {
-                    "text": "/continue を受け付けました。元の指示をワーカーペインへ再送しました。追加作業が完了したら /done で次へ進んでください。",
-                },
-            )
+            self._emit("log", {"text": "/continue を受け付けました。ワーカーに追加指示を送れます。"})
         else:
             self._emit("log", {"text": "/continue は現在利用できません。"})
 

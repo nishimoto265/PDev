@@ -55,6 +55,25 @@ def base_controller(tmp_path):
 
 
 
+def test_workflow_continue_requests(base_controller):
+    controller, events = base_controller
+
+    result = OrchestrationResult(
+        selected_session="session-123",
+        sessions_summary={"worker": {"score": 90}},
+        continue_requested=True,
+    )
+
+    orchestrator = DummyOrchestrator(controller, result)
+    controller._builder = lambda **kwargs: orchestrator
+
+    _run(controller._workflow.run_instruction("Implement feature"))
+
+    assert controller._last_selected_session == "session-123"
+    assert controller._last_scoreboard == {}
+    assert any("継続" in payload.get("text", "") for event, payload in events if event == "log")
+
+
 def test_workflow_cancel_replays_queued(base_controller):
     controller, _ = base_controller
 

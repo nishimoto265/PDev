@@ -28,6 +28,7 @@ class OrchestrationResult:
     selected_session: str
     sessions_summary: Mapping[str, Any] = field(default_factory=dict)
     artifact: Optional["CycleArtifact"] = None
+    continue_requested: bool = False
 
 
 @dataclass(slots=True)
@@ -162,18 +163,13 @@ class Orchestrator:
                     session_signal_map[session_id] = flag_path
             completion_info = self._await_worker_completion(fork_map, session_signal_map)
 
-            while True:
+            if self._worker_decider:
+                try:
+                    continue_requested = self._worker_decider(fork_map, completion_info, layout)
+                except Exception:
+                    continue_requested = False
+            else:
                 continue_requested = False
-                if self._worker_decider:
-                    try:
-                        continue_requested = self._worker_decider(fork_map, completion_info, layout)
-                    except Exception:
-                        continue_requested = False
-                if not continue_requested:
-                    break
-                self._reset_worker_signals(session_signal_map.values())
-                self._redispatch_worker_instruction(layout=layout, user_instruction=instruction)
-                completion_info = self._await_worker_completion(fork_map, session_signal_map)
 
             worker_sessions = {
                 layout.pane_to_worker[pane_id]: session_id
@@ -194,6 +190,16 @@ class Orchestrator:
                 instruction=formatted_instruction,
                 tmux_session=self._session_name,
             )
+
+            if continue_requested:
+                artifact.selected_session_id = main_session_id
+                self._active_worker_sessions = []
+                return OrchestrationResult(
+                    selected_session=main_session_id,
+                    sessions_summary={},
+                    artifact=artifact,
+                    continue_requested=True,
+                )
 
             if self._boss_mode == BossMode.SKIP:
                 boss_session_id = None
@@ -478,25 +484,6 @@ class Orchestrator:
             print("[parallel-dev] Worker completion status:", completion_info)
         return completion_info
 
-    def _reset_worker_signals(self, signal_paths: Iterable[Path]) -> None:
-        for path in signal_paths:
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                continue
-            except OSError:
-                continue
-
-    def _redispatch_worker_instruction(self, *, layout: CycleLayout, user_instruction: str) -> None:
-        message = user_instruction.rstrip()
-        if not message:
-            return
-        for pane_id in layout.worker_panes:
-            self._tmux.prepare_for_instruction(pane_id=pane_id)
-            self._tmux.send_instruction_to_pane(
-                pane_id=pane_id,
-                instruction=message,
-            )
 
     # --------------------------------------------------------------------- #
     # Boss handling

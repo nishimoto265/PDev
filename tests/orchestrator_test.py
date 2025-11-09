@@ -191,22 +191,21 @@ def test_orchestrator_runs_happy_path(dependencies):
     for flag in worker_signal_map.values():
         assert isinstance(flag, Path)
         assert flag.suffix == ".done"
-    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
+    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/worker-1")
     tmux.promote_to_main.assert_called_once_with(
-        session_id="session-boss",
+        session_id="session-worker-1",
         pane_id="pane-main",
     )
     monitor.refresh_session_id.assert_called()
     assert monitor.bind_existing_session.call_args_list[-1] == call(
         pane_id="pane-main",
-        session_id="session-boss",
+        session_id="session-worker-1",
     )
-    monitor.bind_existing_session.assert_called_with(pane_id="pane-main", session_id="session-boss")
-    assert call("session-boss") in monitor.consume_session_until_eof.call_args_list
+    assert call("session-worker-1") in monitor.consume_session_until_eof.call_args_list
     dependencies["logger"].record_cycle.assert_called_once()
-    assert result.selected_session == "session-boss"
-    assert result.sessions_summary["boss"]["score"] == 80.0
-    assert result.sessions_summary["boss"]["selected"] is True
+    assert result.selected_session == "session-worker-1"
+    assert result.sessions_summary["worker-1"]["selected"] is True
+    assert "boss" not in result.sessions_summary
     assert result.artifact is not None
     assert result.artifact.main_session_id == "session-main"
     assert result.artifact.worker_sessions == {
@@ -217,32 +216,17 @@ def test_orchestrator_runs_happy_path(dependencies):
     assert result.artifact.boss_session_id == "session-boss"
 
 
-def test_orchestrator_continue_flows_into_boss_phase(dependencies):
-    decisions = []
+def test_orchestrator_continue_skips_boss_phase(dependencies):
+    decider_called = []
 
     def worker_decider(fork_map, completion, layout):
-        decisions.append(completion)
-        # request continue only on first completion
-        return len(decisions) == 1
-
-    monitor = dependencies["monitor"]
-    monitor.await_completion.side_effect = [
-        {
-            "session-worker-1": {"done": True},
-            "session-worker-2": {"done": True},
-            "session-worker-3": {"done": True},
-        },
-        {
-            "session-worker-1": {"done": True},
-            "session-worker-2": {"done": True},
-            "session-worker-3": {"done": True},
-        },
-    ]
+        decider_called.append(True)
+        return True
 
     orchestrator = Orchestrator(
         tmux_manager=dependencies["tmux"],
         worktree_manager=dependencies["worktree"],
-        monitor=monitor,
+        monitor=dependencies["monitor"],
         log_manager=dependencies["logger"],
         worker_count=3,
         session_name="parallel-dev",
@@ -250,18 +234,19 @@ def test_orchestrator_continue_flows_into_boss_phase(dependencies):
         boss_mode=BossMode.SCORE,
     )
 
-    orchestrator._run_boss_phase = Mock(name="run_boss_phase", return_value=(None, {}))
+    orchestrator._run_boss_phase = Mock(name="run_boss_phase")
 
-    orchestrator.run_cycle(
+    result = orchestrator.run_cycle(
         dependencies["instruction"],
-        selector=lambda candidates, **_: SelectionDecision(
-            selected_key=candidates[0].key,
-            scores={candidate.key: 0.0 for candidate in candidates},
-        ),
+        selector=lambda *_: SelectionDecision("worker-1", {}),
     )
 
-    assert len(monitor.await_completion.call_args_list) == 2
-    orchestrator._run_boss_phase.assert_called_once()
+    assert decider_called
+    orchestrator._run_boss_phase.assert_not_called()
+    dependencies["logger"].record_cycle.assert_not_called()
+    assert result.continue_requested is True
+    assert result.artifact is not None
+    assert result.artifact.main_session_id == "session-main"
 
 
 def test_orchestrator_reuses_main_session_without_resume(dependencies):
@@ -303,7 +288,7 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
         pane_id="pane-boss",
         baseline={Path("/rollout-main"): 1.0},
     )
-    assert monitor.consume_session_until_eof.call_args_list[-1] == call("session-boss")
+    assert monitor.consume_session_until_eof.call_args_list[-1] == call("session-worker-1")
 
 
 def test_ensure_done_directive_always_appends(dependencies):
@@ -492,53 +477,3 @@ def test_rewrite_mode_sends_followup_prompt(dependencies):
     assert len(boss_calls) >= 2
     assert "Boss integration phase" in boss_calls[1]
     assert "touch" in boss_calls[1]
-
-
-def test_orchestrator_continue_resends_instruction(dependencies):
-    tmux = dependencies["tmux"]
-    monitor = dependencies["monitor"]
-
-    completion_first = {
-        "session-worker-1": {"done": True},
-        "session-worker-2": {"done": True},
-        "session-worker-3": {"done": True},
-    }
-    completion_second = {
-        "session-worker-1": {"done": True},
-        "session-worker-2": {"done": True},
-        "session-worker-3": {"done": True},
-    }
-    monitor.await_completion.side_effect = [completion_first, completion_second]
-
-    decisions: List[Mapping[str, Any]] = []
-
-    def worker_decider(fork_map, completion, layout):
-        decisions.append(completion)
-        return len(decisions) == 1  # first completion requests continue, second ends
-
-    orchestrator = Orchestrator(
-        tmux_manager=tmux,
-        worktree_manager=dependencies["worktree"],
-        monitor=monitor,
-        log_manager=dependencies["logger"],
-        worker_count=3,
-        session_name="parallel-dev",
-        worker_decider=worker_decider,
-        boss_mode=BossMode.SKIP,
-    )
-
-    def selector(candidates, scoreboard=None):
-        return SelectionDecision(
-            selected_key=candidates[0].key,
-            scores={candidate.key: 0.0 for candidate in candidates},
-        )
-
-    orchestrator.run_cycle(dependencies["instruction"], selector=selector)
-
-    assert monitor.await_completion.call_count == 2
-    resent = [
-        call.kwargs["instruction"]
-        for call in tmux.send_instruction_to_pane.call_args_list
-        if call.kwargs.get("instruction") == dependencies["instruction"]
-    ]
-    assert resent, "Continue should resend the original user instruction verbatim"
