@@ -668,3 +668,14 @@
   - uv run pytest
   result: tests 116 passed
   notes: controller関連ファイルの配置が明確になり、追加の責務分離や将来のGUI/API拡張に備えた構造が整った
+- date: '2025-11-09'
+  time_utc: '09:00:21'
+  summary: dev_testへEVENING3スクリプトを追加
+  details:
+  - dev_test/25-11-09-17_evening3.pyを新規作成し、開始/準備/出力/完了をDEBUG/INFOログへ細かく書き出すrun/main構成を実装
+  - logs/25-11-09-17_evening3.logに専用FileHandlerで記録し、受け取ったrecipientをextra属性として残して障害解析できるように整理
+  - 指定名の互換レイヤーとしてdev_test/evening3.pyを追加し、importlib.utilで実装モジュールのmain()を呼び出すラッパーを提供
+  reproduce:
+  - uv run python dev_test/evening3.py
+  result: Good evening for the third time, world!が標準出力に表示され、ログファイルへstart/message_prepared/message_emitted/completeが追記される
+  notes: dev_testおよびlogs配下は.gitignore管理のため実装スクリプト本体は未コミット
