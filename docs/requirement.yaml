@@ -45,6 +45,8 @@ metadata:
       - "instruction.log や cycles/*.yaml は `~/.parallel-dev/logs/<session_id>/<cycle_timestamp>/` に保存され、セッション対応表は `~/.parallel-dev/session_maps/<session_id>.yaml` に保存される。"
   評価・採用フロー:
     - "Boss Codexは評価プロンプトに従い、各候補に対する0〜100の`score`と`comment`をJSON形式で返す。"
+    - "ControllerとUIの通知は `ControllerEventType` (status/log/log_copy/log_save/scoreboard/selection_request/selection_finished/pause_state/quit) を用いて統一される。詳細は docs/25-11-09-08_controller_contract.md を参照。"
+    - "CLI設定 (SettingsStore) とセッションマニフェスト (SessionManifest) は `parallel_developer.stores` パッケージで提供され、格納パスやキー構造は同ドキュメントで定義する。"
     - "CodexMonitorがBoss出力を取り込み、CLIがスコアボード（例: worker1 80, worker2 50, boss -）として表示する。"
     - "ユーザーはCLIプロンプトで採用案を手動選択し、選択結果がスコアボードにマークされる。"
     - "選択された候補のワークツリーをmainへfast-forwardマージし、必要に応じてBoss案はbossブランチを適用する。"
