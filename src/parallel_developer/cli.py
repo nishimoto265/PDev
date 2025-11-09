@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from pathlib import Path
+import shutil
+import subprocess
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -458,9 +460,32 @@ class ParallelDeveloperApp(App):
         if not text:
             return "コピー対象のログがありません。"
         self.copy_to_clipboard(text)
+        self._copy_to_system_clipboard(text)
         if from_selection:
             return "選択範囲をクリップボードへコピーしました。"
         return "ログ全体をクリップボードへコピーしました。"
+
+    def _copy_to_system_clipboard(self, text: str) -> None:
+        commands = []
+        if shutil.which("pbcopy"):
+            commands.append(["pbcopy"])
+        if shutil.which("wl-copy"):
+            commands.append(["wl-copy"])
+        if shutil.which("xclip"):
+            commands.append(["xclip", "-selection", "clipboard"])
+        if shutil.which("clip.exe"):
+            commands.append(["clip.exe"])
+
+        for command in commands:
+            try:
+                subprocess.run(
+                    command,
+                    input=text.encode("utf-8"),
+                    check=True,
+                )
+                break
+            except Exception:
+                continue
 
     def _save_log_to_path(self, destination: str) -> str:
         text, _ = self._collect_log_text()

@@ -585,7 +585,11 @@ class Orchestrator:
                 )
             )
 
-        if boss_session_id:
+        include_boss = (
+            boss_session_id
+            and self._boss_mode == BossMode.REWRITE
+        )
+        if include_boss:
             candidates.append(
                 CandidateInfo(
                     key="boss",
@@ -611,6 +615,8 @@ class Orchestrator:
         selected_info = candidate_map[decision.selected_key]
         if selected_info.session_id is None:
             raise RuntimeError("Selected candidate has no session id; cannot resume main session.")
+        if selected_info.key == "boss" and self._boss_mode != BossMode.REWRITE:
+            raise ValueError("Boss candidate is only available in rewrite mode.")
         return selected_info
 
     def _finalize_selection(
@@ -620,8 +626,11 @@ class Orchestrator:
         main_pane: str,
     ) -> None:
         self._tmux.interrupt_pane(pane_id=main_pane)
-        if selected.branch:
-            self._worktree.merge_into_main(selected.branch)
+        if selected.branch and selected.key != "boss":
+            try:
+                self._worktree.merge_into_main(selected.branch)
+            except Exception:
+                pass
         if selected.session_id:
             self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
             bind_existing = getattr(self._monitor, "bind_existing_session", None)

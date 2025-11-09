@@ -106,8 +106,10 @@ def test_orchestrator_runs_happy_path(dependencies):
 
     def selector(candidates, scoreboard=None):
         scores = {candidate.key: 0.0 for candidate in candidates}
-        scores["boss"] = 1.0
-        return SelectionDecision(selected_key="boss", scores=scores)
+        if candidates:
+            scores[candidates[0].key] = 1.0
+            return SelectionDecision(selected_key=candidates[0].key, scores=scores)
+        return SelectionDecision(selected_key="worker-1", scores=scores)
 
     result = orchestrator.run_cycle(dependencies["instruction"], selector=selector)
 
@@ -171,12 +173,11 @@ def test_orchestrator_runs_happy_path(dependencies):
         "baseline": {Path("/rollout-main"): 1.0},
     }
     prepare_calls = [call.kwargs for call in tmux.prepare_for_instruction.call_args_list]
-    assert prepare_calls[:5] == [
+    assert prepare_calls[:4] == [
         {"pane_id": "pane-main"},
         {"pane_id": "pane-worker-1"},
         {"pane_id": "pane-worker-2"},
         {"pane_id": "pane-worker-3"},
-        {"pane_id": "pane-boss"},
     ]
     boss_instruction_call = send_calls[-1]
     assert boss_instruction_call.kwargs["pane_id"] == "pane-boss"
@@ -276,8 +277,10 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
 
     def selector(candidates, scoreboard=None):
         scores = {candidate.key: 0.0 for candidate in candidates}
-        scores["boss"] = 1.0
-        return SelectionDecision(selected_key="boss", scores=scores)
+        if candidates:
+            scores[candidates[0].key] = 1.0
+            return SelectionDecision(selected_key=candidates[0].key, scores=scores)
+        return SelectionDecision(selected_key="worker-1", scores=scores)
 
     tmux = dependencies["tmux"]
     monitor = dependencies["monitor"]
@@ -293,10 +296,7 @@ def test_orchestrator_reuses_main_session_without_resume(dependencies):
         resume_session_id="session-prev",
     )
 
-    assert monitor.bind_existing_session.call_args_list == [
-        call(pane_id="pane-main", session_id="session-prev"),
-        call(pane_id="pane-main", session_id="session-boss"),
-    ]
+    assert monitor.bind_existing_session.call_args_list[0] == call(pane_id="pane-main", session_id="session-prev")
     tmux.launch_main_session.assert_not_called()
     assert not tmux.resume_session.called
     monitor.register_new_rollout.assert_called_once_with(
@@ -356,6 +356,29 @@ def test_orchestrator_skip_boss_mode(dependencies):
     boss_calls = [call for call in monitor.register_new_rollout.call_args_list if call.kwargs.get("pane_id") == "pane-boss"]
     assert not boss_calls
     assert "boss" not in result.sessions_summary
+
+
+def test_orchestrator_does_not_include_boss_in_score_mode(dependencies):
+    orchestrator = Orchestrator(
+        tmux_manager=dependencies["tmux"],
+        worktree_manager=dependencies["worktree"],
+        monitor=dependencies["monitor"],
+        log_manager=dependencies["logger"],
+        worker_count=3,
+        session_name="parallel-dev",
+        boss_mode=BossMode.SCORE,
+    )
+
+    orchestrator.run_cycle(
+        dependencies["instruction"],
+        selector=lambda candidates, **_: SelectionDecision(
+            selected_key=candidates[0].key,
+            scores={candidate.key: 1.0 if candidate == candidates[0] else 0.0 for candidate in candidates},
+        ),
+    )
+
+    scoreboard = dependencies["logger"].record_cycle.call_args.kwargs["result"].sessions_summary
+    assert "boss" not in scoreboard
 
 
 def test_boss_instruction_rewrite_mode():
