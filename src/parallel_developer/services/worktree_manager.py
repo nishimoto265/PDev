@@ -65,11 +65,6 @@ class WorktreeManager:
     def boss_branch(self) -> str:
         return self._boss_branch
 
-    def merge_into_main(self, branch_name: str) -> None:
-        if self._repo.is_dirty(untracked_files=False):
-            raise RuntimeError("Main repository has uncommitted changes; cannot merge results.")
-        self._repo.git.merge(branch_name, "--ff-only")
-
     def _ensure_repo_initialized(self) -> None:
         try:
             _ = self._repo.head.commit  # type: ignore[attr-defined]

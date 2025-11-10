@@ -1263,9 +1263,17 @@ class CLIController:
         reason_labels = {
             "agent_auto": "エージェントが統合を担当",
         }
-        if status == "merged":
-            self._emit(ControllerEventType.LOG, {"text": f"[merge] {branch} を fast-forward で main に反映しました。"})
-            self._emit_status("再開中")
+        if status == "delegate" and reason_key == "manual_user":
+            self._emit(
+                ControllerEventType.LOG,
+                {
+                    "text": (
+                        f"[merge] manualモード: {branch} の統合作業はユーザに委譲されています。"
+                        "必要な作業を終えたら /done で次に進んでください。"
+                    )
+                },
+            )
+            self._emit_status("統合作業待ち")
         elif status == "delegate":
             label = reason_labels.get(reason_key, reason_key or "手動統合に切り替え")
             detail = f" 詳細: {error}" if error else ""

@@ -110,12 +110,22 @@ def test_merge_command(controller, event_recorder):
 
 def test_handle_merge_outcome_logging(controller, event_recorder):
     events, _ = event_recorder
-    outcome = MergeOutcome(strategy=OrchestratorMergeMode.MANUAL, status="merged", branch="feature")
+    outcome = MergeOutcome(
+        strategy=OrchestratorMergeMode.MANUAL,
+        status="delegate",
+        branch="feature",
+        reason="manual_user",
+    )
     controller._handle_merge_outcome(outcome)
-    assert any("fast-forward" in payload.get("text", "") for event, payload in events if event == "log")
+    assert any("manualモード" in payload.get("text", "") for event, payload in events if event == "log")
 
     events.clear()
-    delegate = MergeOutcome(strategy=OrchestratorMergeMode.AUTO, status="delegate", branch="feature", reason="strategy_agent_only")
+    delegate = MergeOutcome(
+        strategy=OrchestratorMergeMode.AUTO,
+        status="delegate",
+        branch="feature",
+        reason="agent_auto",
+    )
     controller._handle_merge_outcome(delegate)
     assert any("エージェント" in payload.get("text", "") for event, payload in events if event == "log")
 

@@ -195,7 +195,8 @@ def test_orchestrator_runs_happy_path(dependencies):
     for flag in worker_signal_map.values():
         assert isinstance(flag, Path)
         assert flag.suffix == ".done"
-    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/worker-1")
+    assert result.merge_outcome.status == "delegate"
+    assert result.merge_outcome.reason == "manual_user"
     tmux.promote_to_main.assert_called_once_with(
         session_id="session-worker-1",
         pane_id="pane-main",
@@ -203,7 +204,7 @@ def test_orchestrator_runs_happy_path(dependencies):
     monitor.refresh_session_id.assert_called()
 
 
-def test_boss_branch_is_merged_in_rewrite_mode():
+def test_boss_branch_delegates_in_rewrite_mode():
     tmux = Mock()
     worktree = Mock()
     monitor = Mock()
@@ -230,12 +231,9 @@ def test_boss_branch_is_merged_in_rewrite_mode():
 
     outcome = orchestrator._finalize_selection(selected=candidate, main_pane="pane-main")
 
-    worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
-    assert outcome.status == "merged"
-    assert any(
-        call.args == ("[merge] ブランチ parallel-dev/session-a/boss を fast-forward で main に取り込みました。",)
-        for call in log_hook.call_args_list
-    )
+    assert outcome.status == "delegate"
+    assert outcome.reason == "manual_user"
+    assert log_hook.call_args_list == [call("[phase] メインセッションを再開しました。 ::status::再開中")]
 
 
 def test_auto_merge_requests_agent_commit(tmp_path):
@@ -278,6 +276,15 @@ def test_auto_merge_requests_agent_commit(tmp_path):
     )
     orchestrator._active_signals = signal_paths
 
+    import threading
+    import time
+
+    def touch_flag():
+        time.sleep(0.1)
+        flag_path.touch()
+
+    threading.Thread(target=touch_flag, daemon=True).start()
+
     merge_outcome = orchestrator._auto_commit_and_finalize(
         selected=candidate,
         layout=layout,
@@ -285,33 +292,11 @@ def test_auto_merge_requests_agent_commit(tmp_path):
     )
 
     tmux.send_instruction_to_pane.assert_called_once()
-    monitor.await_completion.assert_called_once()
-    worktree.merge_into_main.assert_not_called()
+    monitor.await_completion.assert_not_called()
     assert merge_outcome.status == "delegate"
     assert merge_outcome.reason == "agent_auto"
 
 
-def test_merge_failure_logs_message(dependencies):
-    log_messages = []
-    dependencies["worktree"].merge_into_main.side_effect = RuntimeError("dirty tree")
-
-    orchestrator = Orchestrator(
-        tmux_manager=dependencies["tmux"],
-        worktree_manager=dependencies["worktree"],
-        monitor=dependencies["monitor"],
-        log_manager=dependencies["logger"],
-        worker_count=3,
-        session_name="parallel-dev",
-        boss_mode=BossMode.SCORE,
-        log_hook=log_messages.append,
-    )
-
-    def selector(candidates, scoreboard=None):
-        return SelectionDecision(selected_key=candidates[0].key, scores={c.key: 0.0 for c in candidates})
-
-    orchestrator.run_cycle(dependencies["instruction"], selector=selector)
-
-    assert any("マージに失敗" in message for message in log_messages)
 
 
 def test_orchestrator_handles_worker_continuation(dependencies):

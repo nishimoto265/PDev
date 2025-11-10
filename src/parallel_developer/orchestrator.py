@@ -677,31 +677,21 @@ class Orchestrator:
         *,
         selected: CandidateInfo,
         main_pane: str,
-        perform_merge: bool = True,
+        delegate_reason: Optional[str] = None,
     ) -> MergeOutcome:
         self._tmux.interrupt_pane(pane_id=main_pane)
+        reason = delegate_reason
+        if reason is None:
+            if self._merge_mode == MergeMode.AUTO:
+                reason = "agent_auto"
+            else:
+                reason = "manual_user"
         merge_outcome = MergeOutcome(
             strategy=self._merge_mode,
-            status="skipped",
+            status="delegate",
             branch=selected.branch,
+            reason=reason,
         )
-        if perform_merge and selected.branch:
-            try:
-                self._worktree.merge_into_main(selected.branch)
-                merge_outcome.status = "merged"
-                self._log_merge_success(selected.branch)
-            except Exception as exc:  # noqa: BLE001
-                message = f"[merge] ブランチ {selected.branch} のマージに失敗しました: {exc}"
-                if self._log_hook:
-                    try:
-                        self._log_hook(message)
-                    except Exception:
-                        pass
-                merge_outcome.error = str(exc)
-                merge_outcome.status = "failed"
-        elif not perform_merge:
-            merge_outcome.status = "delegate"
-            merge_outcome.reason = "agent_auto"
         if selected.session_id:
             self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
             bind_existing = getattr(self._monitor, "bind_existing_session", None)
@@ -728,7 +718,11 @@ class Orchestrator:
     ) -> MergeOutcome:
         pane_id = selected.pane_id or self._resolve_candidate_pane(selected.key, layout)
         if pane_id is None:
-            return self._finalize_selection(selected=selected, main_pane=layout.main_pane)
+            return self._finalize_selection(
+                selected=selected,
+                main_pane=layout.main_pane,
+                delegate_reason="manual_user",
+            )
 
         flag_path = self._resolve_flag_path(selected.key, signal_paths)
         if flag_path:
@@ -748,7 +742,11 @@ class Orchestrator:
 
         self._phase_log("コミット報告を受け取りました。", status="マージ処理中")
         self._pull_main_after_auto()
-        return self._finalize_selection(selected=selected, main_pane=layout.main_pane, perform_merge=False)
+        return self._finalize_selection(
+            selected=selected,
+            main_pane=layout.main_pane,
+            delegate_reason="agent_auto",
+        )
 
     def _resolve_candidate_pane(self, key: str, layout: CycleLayout) -> Optional[str]:
         if key == "boss":
@@ -838,15 +836,6 @@ class Orchestrator:
             payload = f"{payload} ::status::{status}"
         try:
             self._log_hook(payload)
-        except Exception:
-            pass
-
-    def _log_merge_success(self, branch: Optional[str]) -> None:
-        if not self._log_hook:
-            return
-        message = f"[merge] ブランチ {branch or 'N/A'} を fast-forward で main に取り込みました。"
-        try:
-            self._log_hook(message)
         except Exception:
             pass
 
