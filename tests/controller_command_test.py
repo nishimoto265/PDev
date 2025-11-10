@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import yaml
 
-from parallel_developer.controller import CLIController, FlowMode, MergeStrategy
-from parallel_developer.orchestrator import BossMode, CandidateInfo, MergeOutcome, OrchestrationResult
+from parallel_developer.controller import CLIController, FlowMode, MergeMode
+from parallel_developer.orchestrator import BossMode, CandidateInfo, MergeMode as OrchestratorMergeMode, MergeOutcome, OrchestrationResult
 from parallel_developer.stores import PaneRecord, SessionManifest, SessionReference, SettingsStore
 
 
@@ -95,8 +95,8 @@ def test_mode_command(controller, event_recorder):
 
 def test_merge_command(controller, event_recorder):
     events, _ = event_recorder
-    _run(controller.execute_command("/merge", "agent_only"))
-    assert controller._merge_strategy == MergeStrategy.AGENT_ONLY
+    _run(controller.execute_command("/merge", "auto"))
+    assert controller._merge_mode == MergeMode.AUTO
     assert any("マージ戦略を" in payload.get("text", "") for event, payload in events if event == "log")
 
     events.clear()
@@ -110,12 +110,12 @@ def test_merge_command(controller, event_recorder):
 
 def test_handle_merge_outcome_logging(controller, event_recorder):
     events, _ = event_recorder
-    outcome = MergeOutcome(strategy=MergeStrategy.FAST_ONLY, status="merged", branch="feature")
+    outcome = MergeOutcome(strategy=OrchestratorMergeMode.MANUAL, status="merged", branch="feature")
     controller._handle_merge_outcome(outcome)
     assert any("fast-forward" in payload.get("text", "") for event, payload in events if event == "log")
 
     events.clear()
-    delegate = MergeOutcome(strategy=MergeStrategy.AGENT_ONLY, status="delegate", branch="feature", reason="strategy_agent_only")
+    delegate = MergeOutcome(strategy=OrchestratorMergeMode.AUTO, status="delegate", branch="feature", reason="strategy_agent_only")
     controller._handle_merge_outcome(delegate)
     assert any("エージェント" in payload.get("text", "") for event, payload in events if event == "log")
 

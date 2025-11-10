@@ -89,7 +89,8 @@ pdev
 - Bossの役目を決めます。`skip`で完全省略、`score`で採点役、`rewrite`で「採点＋統合実装まで担当」という流れを用意できます。
 
 ### `/merge`（`/marge`）
-- 自動マージの態度を決めます。衝突ゼロなら `fast_only`、常にエージェントへ任せたいなら `agent_only`、まずは自動マージを試したいなら `fast_then_agent`。
+- `manual`: これまで通りホスト側がFast-Forwardで統合します。
+- `auto`: 採択されたエージェントに「git add/commit→mainへFast-Forward→完了フラグ」の手順を送ってからマージします。
 
 ### `/continue` と `/done`
 - `/continue`: 完了扱いになったワーカーを再び動かし、ユーザーが追加入力した内容をそのまま送ります。

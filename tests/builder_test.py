@@ -49,7 +49,7 @@ def test_build_orchestrator_wires_dependencies(monkeypatch):
     monkeypatch.setattr("parallel_developer.controller.LogManager", lambda **_: log_manager)
     def fake_orchestrator(**kwargs):
         assert kwargs["boss_mode"].value == "score"
-        assert kwargs["merge_strategy"].value == "fast_only"
+        assert kwargs["merge_mode"].value == "manual"
         return orchestrator_instance
 
     monkeypatch.setattr(

@@ -50,7 +50,7 @@ class WorkflowRunner:
             project_root=c._worktree_root,
             worktree_storage_root=c._worktree_storage_root,
             log_hook=self._controller._log_hook,
-            merge_strategy=c._config.merge_strategy,
+            merge_mode=c._config.merge_mode,
         )
         c._active_orchestrator = orchestrator
         c._last_tmux_manager = getattr(orchestrator, "_tmux", None)

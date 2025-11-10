@@ -33,10 +33,10 @@ def build_command_specs(
     *,
     flow_mode_cls,
     boss_mode_cls,
-    merge_strategy_cls,
+    merge_mode_cls,
 ) -> Dict[str, CommandSpecEntry]:
     FlowMode = flow_mode_cls  # alias for brevity
-    MergeStrategy = merge_strategy_cls
+    MergeMode = merge_mode_cls
     specs = {
         "/attach": CommandSpecEntry(
             "tmux接続の方法を切り替える",
@@ -71,19 +71,14 @@ def build_command_specs(
             controller._cmd_merge,
             options=[
                 CommandOption(
-                    "fast_only - Fast-Forwardのみ",
-                    MergeStrategy.FAST_ONLY.value,
-                    "GitのFast-Forwardだけを試みる",
+                    "manual - ホストが従来どおりマージ",
+                    MergeMode.MANUAL.value,
+                    "ホスト側がFast-Forwardなどを実行",
                 ),
                 CommandOption(
-                    "agent_only - エージェントに任せる",
-                    MergeStrategy.AGENT_ONLY.value,
-                    "Gitマージは行わずエージェントに任せる",
-                ),
-                CommandOption(
-                    "fast_then_agent - 失敗時はエージェント",
-                    MergeStrategy.FAST_THEN_AGENT.value,
-                    "Fast-Forwardを試み失敗時にエージェントへ移行",
+                    "auto - エージェントがコミット・統合作業",
+                    MergeMode.AUTO.value,
+                    "採択エージェントにコミット/統合手順を送る",
                 ),
             ],
         ),

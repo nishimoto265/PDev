@@ -51,7 +51,7 @@ class SettingsData:
     parallel: str = "3"
     mode: str = "parallel"
     commit: str = "manual"
-    merge: str = "fast_only"
+    merge: str = "manual"
     worktree_root: Optional[str] = None
 
 
@@ -62,6 +62,15 @@ class SettingsStore:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._data: SettingsData = self._load()
+
+    @staticmethod
+    def _normalize_merge(value: Optional[str]) -> str:
+        if value is None:
+            return "manual"
+        token = str(value).strip().lower()
+        if token not in {"manual", "auto"}:
+            return "manual"
+        return token
 
     @property
     def attach(self) -> str:
@@ -207,7 +216,7 @@ class SettingsStore:
                 parallel=str(commands.get("parallel", "3")),
                 mode=str(commands.get("mode", "parallel")),
                 commit=str(commands.get("commit", "manual")),
-                merge=str(commands.get("merge", "fast_only")),
+                merge=self._normalize_merge(commands.get("merge")),
                 worktree_root=worktree_root_value,
             )
 
@@ -219,7 +228,7 @@ class SettingsStore:
             parallel=str(payload.get("worker_count", "3")),
             mode=str(payload.get("session_mode", "parallel")),
             commit="auto" if bool(payload.get("auto_commit", False)) else "manual",
-            merge="fast_only",
+            merge="manual",
             worktree_root=None,
         )
 

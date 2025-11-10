@@ -684,7 +684,7 @@
   summary: マージ戦略を切替える/mergeコマンドと結果トラッキングを追加
   details:
   - SettingsStoreとSessionConfigにmerge設定を追加し、/merge(別名/marge)でfast_only/agent_only/fast_then_agentを選択できるようにした
-  - OrchestratorへMergeStrategy/MergeOutcomeを導入し、fast-forward成功/失敗/委譲の結果を記録してControllerとログへ伝播
+  - OrchestratorへMergeMode/MergeOutcomeを導入し、fast-forward成功/失敗の結果を記録してControllerとログへ伝播
   - WorkflowRunnerがアウトカムをUIへ表示し、LogManagerはcycleログにmerge_outcomeイベントを追記
   - テストはbuilder/command/orchestratorワークフローにケースを追加し、uv run pytest(122件)で全通過を確認
   reproduce:
@@ -712,3 +712,15 @@
   - uv run python dev_test/evening2.py --recipient world
   result: Good evening again, world!が標準出力に表示され、logs/25-11-10-13_evening2.logへ詳細ログが追記される
   notes: 将来の実装差し替え時はラッパーのIMPLEMENTATION_FILENAMEを書き換えるだけで互換性を保てる
+- date: '2025-11-10'
+  time_utc: '09:50:00'
+  summary: マージモードをmanual/autoに整理し、auto時は採択エージェントへコミット指示を送る
+  details:
+  - /merge コマンドを manual / auto に変更し、設定を~/.parallel-dev/config.yamlへ永続化
+  - autoモードでは採択されたワーカー/Bossへ git add/commit + main fast-forward のテンプレを送り、完了フラグを再利用
+  - 手動モードは従来どおりホスト側でFast-Forwardし、ログ/ステータスにはフェーズ進行ログを表示
+  - Orchestrator/コントローラ/テストを更新し、dev_test をコミット対象に戻した
+  reproduce:
+  - uv run pytest
+  result: tests 123 passed
+  notes: autoモードでもtouch完了プロトコルを維持し、ホストは完了通知を待ってからメインを再開する

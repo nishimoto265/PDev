@@ -21,10 +21,9 @@ class BossMode(str, Enum):
     REWRITE = "rewrite"
 
 
-class MergeStrategy(str, Enum):
-    FAST_ONLY = "fast_only"
-    AGENT_ONLY = "agent_only"
-    FAST_THEN_AGENT = "fast_then_agent"
+class MergeMode(str, Enum):
+    MANUAL = "manual"
+    AUTO = "auto"
 
 
 @dataclass(slots=True)
@@ -45,6 +44,7 @@ class CandidateInfo:
     session_id: Optional[str]
     branch: str
     worktree: Path
+    pane_id: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -95,7 +95,7 @@ class SignalPaths:
 
 @dataclass(slots=True)
 class MergeOutcome:
-    strategy: MergeStrategy
+    strategy: MergeMode
     status: Literal["skipped", "merged", "delegate", "failed"]
     branch: Optional[str] = None
     error: Optional[str] = None
@@ -118,7 +118,7 @@ class Orchestrator:
         worker_decider: Optional[Callable[[Mapping[str, str], Mapping[str, Any], "CycleLayout"], WorkerDecision]] = None,
         boss_mode: BossMode = BossMode.SCORE,
         log_hook: Optional[Callable[[str], None]] = None,
-        merge_strategy: MergeStrategy = MergeStrategy.FAST_ONLY,
+        merge_mode: MergeMode = MergeMode.MANUAL,
     ) -> None:
         self._tmux = tmux_manager
         self._worktree = worktree_manager
@@ -132,9 +132,7 @@ class Orchestrator:
         self._worker_decider = worker_decider
         self._active_signals: Optional[SignalPaths] = None
         self._log_hook = log_hook
-        self._merge_strategy = (
-            merge_strategy if isinstance(merge_strategy, MergeStrategy) else MergeStrategy(str(merge_strategy))
-        )
+        self._merge_mode = merge_mode if isinstance(merge_mode, MergeMode) else MergeMode(str(merge_mode))
 
     def set_main_session_hook(self, hook: Optional[Callable[[str], None]]) -> None:
         self._main_session_hook = hook
@@ -292,7 +290,14 @@ class Orchestrator:
 
             selected_info = self._validate_selection(decision, candidates)
             self._phase_log(f"候補 {selected_info.key} を採択しました。", status="マージ処理中")
-            merge_outcome = self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
+            if self._merge_mode == MergeMode.AUTO:
+                merge_outcome = self._auto_commit_and_finalize(
+                    selected=selected_info,
+                    layout=layout,
+                    signal_paths=signal_paths,
+                )
+            else:
+                merge_outcome = self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
             artifact.selected_session_id = selected_info.session_id
 
             result = OrchestrationResult(
@@ -626,6 +631,7 @@ class Orchestrator:
                     session_id=resolved_session,
                     branch=branch_name,
                     worktree=worktree_path,
+                    pane_id=pane_id,
                 )
             )
 
@@ -642,6 +648,7 @@ class Orchestrator:
                     session_id=resolved_boss,
                     branch=self._worktree.boss_branch,
                     worktree=boss_path,
+                    pane_id=layout.boss_pane,
                 )
             )
         return candidates
@@ -672,34 +679,24 @@ class Orchestrator:
     ) -> MergeOutcome:
         self._tmux.interrupt_pane(pane_id=main_pane)
         merge_outcome = MergeOutcome(
-            strategy=self._merge_strategy,
+            strategy=self._merge_mode,
             status="skipped",
             branch=selected.branch,
         )
         if selected.branch:
-            if self._merge_strategy == MergeStrategy.AGENT_ONLY:
-                merge_outcome.status = "delegate"
-                merge_outcome.reason = "strategy_agent_only"
-                self._log_merge_delegate(selected.branch, merge_outcome.reason)
-            else:
-                try:
-                    self._worktree.merge_into_main(selected.branch)
-                    merge_outcome.status = "merged"
-                    self._log_merge_success(selected.branch)
-                except Exception as exc:  # noqa: BLE001
-                    message = f"[merge] ブランチ {selected.branch} のマージに失敗しました: {exc}"
-                    if self._log_hook:
-                        try:
-                            self._log_hook(message)
-                        except Exception:
-                            pass
-                    merge_outcome.error = str(exc)
-                    if self._merge_strategy == MergeStrategy.FAST_THEN_AGENT:
-                        merge_outcome.status = "delegate"
-                        merge_outcome.reason = "fast_forward_failed"
-                        self._log_merge_delegate(selected.branch, merge_outcome.reason, merge_outcome.error)
-                    else:
-                        merge_outcome.status = "failed"
+            try:
+                self._worktree.merge_into_main(selected.branch)
+                merge_outcome.status = "merged"
+                self._log_merge_success(selected.branch)
+            except Exception as exc:  # noqa: BLE001
+                message = f"[merge] ブランチ {selected.branch} のマージに失敗しました: {exc}"
+                if self._log_hook:
+                    try:
+                        self._log_hook(message)
+                    except Exception:
+                        pass
+                merge_outcome.error = str(exc)
+                merge_outcome.status = "failed"
         if selected.session_id:
             self._tmux.promote_to_main(session_id=selected.session_id, pane_id=main_pane)
             bind_existing = getattr(self._monitor, "bind_existing_session", None)
@@ -716,6 +713,78 @@ class Orchestrator:
             except Exception:
                 pass
         return merge_outcome
+
+    def _auto_commit_and_finalize(
+        self,
+        *,
+        selected: CandidateInfo,
+        layout: CycleLayout,
+        signal_paths: Optional[SignalPaths],
+    ) -> MergeOutcome:
+        pane_id = selected.pane_id or self._resolve_candidate_pane(selected.key, layout)
+        if pane_id is None:
+            return self._finalize_selection(selected=selected, main_pane=layout.main_pane)
+
+        flag_path = self._resolve_flag_path(selected.key, signal_paths)
+        if flag_path:
+            try:
+                flag_path.unlink()
+            except FileNotFoundError:
+                pass
+
+        instruction = self._build_agent_commit_instruction(selected, flag_path)
+        self._phase_log("採択エージェントへコミット/統合手順を送信しました。", status="コミット指示中")
+        self._tmux.prepare_for_instruction(pane_id=pane_id)
+        self._tmux.send_instruction_to_pane(pane_id=pane_id, instruction=instruction)
+
+        if flag_path and selected.session_id:
+            self._phase_log("コミット結果を待っています。", status="コミット待ち")
+            self._monitor.await_completion(
+                session_ids=[selected.session_id],
+                signal_paths={selected.session_id: flag_path},
+            )
+
+        self._phase_log("コミット報告を受け取りました。", status="マージ処理中")
+        return self._finalize_selection(selected=selected, main_pane=layout.main_pane)
+
+    def _resolve_candidate_pane(self, key: str, layout: CycleLayout) -> Optional[str]:
+        if key == "boss":
+            return layout.boss_pane
+        for pane_id, worker_name in layout.pane_to_worker.items():
+            if worker_name == key:
+                return pane_id
+        return None
+
+    def _resolve_flag_path(self, key: str, signal_paths: Optional[SignalPaths]) -> Optional[Path]:
+        if not signal_paths:
+            return None
+        if key == "boss":
+            return signal_paths.boss_flag
+        return signal_paths.worker_flags.get(key)
+
+    def _build_agent_commit_instruction(self, selected: CandidateInfo, flag_path: Optional[Path]) -> str:
+        worktree = str(selected.worktree)
+        branch = selected.branch
+        commit_message = f"Auto update from {selected.key}"
+        lines = [
+            "追加タスク: 以下の手順で成果物をコミットし、ホストへ共有してください。",
+            f"- 作業ディレクトリ: {worktree}",
+            f"- 対象ブランチ: {branch}",
+            "",
+            "手順:",
+            f"1. cd {worktree}",
+            "2. git status -sb で変更を確認してください。",
+            "3. 必要なファイルを git add してください (例: dev_test、docs/experiment.yaml など)。",
+            f"4. git commit -m \"{commit_message}\"",
+            f"5. git checkout main && git pull --ff-only && git merge --ff-only {branch} && git checkout {branch}",
+        ]
+        if flag_path:
+            flag_text = str(flag_path)
+            lines.append(f"6. コミットが完了したら `touch {flag_text}` で完了を通知してください。")
+            lines.append("7. 最後に /done を送り、途中でエラーがあればログを報告してください。")
+        else:
+            lines.append("6. コミット完了後に /done を送ってください。エラーが出れば内容を共有してください。")
+        return "\n".join(lines)
 
     def _log_merge_delegate(self, branch: Optional[str], reason: str, error: Optional[str] = None) -> None:
         if not self._log_hook:
