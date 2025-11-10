@@ -291,6 +291,7 @@ class Orchestrator:
             )
 
             selected_info = self._validate_selection(decision, candidates)
+            self._phase_log(f"候補 {selected_info.key} を採択しました。", status="マージ処理中")
             merge_outcome = self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
             artifact.selected_session_id = selected_info.session_id
 
@@ -503,6 +504,7 @@ class Orchestrator:
                 pane_id=pane_id,
                 instruction=message,
             )
+        self._phase_log("ワーカー実行を開始しました。", status="ワーカー実行中")
 
     def _dispatch_worker_continuation(
         self,
@@ -533,6 +535,7 @@ class Orchestrator:
         )
         if os.getenv("PARALLEL_DEV_DEBUG_STATE") == "1":
             print("[parallel-dev] Worker completion status:", completion_info)
+        self._phase_log("ワーカー処理が完了しました。", status="採点準備中")
         return completion_info
 
 
@@ -571,6 +574,7 @@ class Orchestrator:
             layout.worker_names,
             user_instruction,
         )
+        self._phase_log("採点フェーズを開始します。", status="採点中")
         self._tmux.send_instruction_to_pane(
             pane_id=layout.boss_pane,
             instruction=boss_instruction,
@@ -595,6 +599,7 @@ class Orchestrator:
         else:
             completion_info[boss_session_id] = {"done": True, "scores_detected": True}
 
+        self._phase_log("採点フェーズが完了しました。", status="採択待ち")
         return boss_session_id, boss_metrics
 
     # --------------------------------------------------------------------- #
@@ -703,6 +708,7 @@ class Orchestrator:
                     bind_existing(pane_id=main_pane, session_id=selected.session_id)
                 except Exception:
                     pass
+            self._phase_log("メインセッションを再開しました。", status="再開中")
         consume = getattr(self._monitor, "consume_session_until_eof", None)
         if callable(consume):
             try:
@@ -724,6 +730,17 @@ class Orchestrator:
             message += f" 詳細: {error}"
         try:
             self._log_hook(message)
+        except Exception:
+            pass
+
+    def _phase_log(self, message: str, status: Optional[str] = None) -> None:
+        if not self._log_hook:
+            return
+        payload = f"[phase] {message}"
+        if status:
+            payload = f"{payload} ::status::{status}"
+        try:
+            self._log_hook(payload)
         except Exception:
             pass
 

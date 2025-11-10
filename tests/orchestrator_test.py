@@ -319,7 +319,10 @@ def test_boss_branch_is_merged_in_rewrite_mode():
 
     worktree.merge_into_main.assert_called_once_with("parallel-dev/session-a/boss")
     assert outcome.status == "merged"
-    log_hook.assert_called_with("[merge] ブランチ parallel-dev/session-a/boss を fast-forward で main に取り込みました。")
+    assert any(
+        call.args == ("[merge] ブランチ parallel-dev/session-a/boss を fast-forward で main に取り込みました。",)
+        for call in log_hook.call_args_list
+    )
 
 
 def test_merge_failure_logs_message(dependencies):

@@ -272,7 +272,7 @@ class CLIController:
         )
         self._worker_flow = WorkerFlowHelper(self, FlowMode)
         self._pause_helper = PauseHelper(self)
-        self._log_hook = lambda message: self._emit(ControllerEventType.LOG, {"text": message})
+        self._log_hook = self._handle_orchestrator_log
         self._workflow = WorkflowRunner(self)
 
     async def handle_input(self, user_input: str) -> None:
@@ -1267,6 +1267,7 @@ class CLIController:
         }
         if status == "merged":
             self._emit(ControllerEventType.LOG, {"text": f"[merge] {branch} を fast-forward で main に反映しました。"})
+            self._emit_status("再開中")
         elif status == "delegate":
             label = reason_labels.get(reason_key, reason_key or "手動統合に切り替え")
             detail = f" 詳細: {error}" if error else ""
@@ -1274,11 +1275,24 @@ class CLIController:
                 ControllerEventType.LOG,
                 {"text": f"[merge] 自動マージをスキップし、エージェントに委譲します ({label}).{detail}"},
             )
+            self._emit_status("統合作業待ち")
         elif status == "failed":
             self._emit(
                 ControllerEventType.LOG,
                 {"text": f"[merge] {branch} の自動マージに失敗しました: {error or '理由不明'}. /merge コマンドで戦略を切り替えてください。"},
             )
+            self._emit_status("マージ失敗")
+
+    def _handle_orchestrator_log(self, message: str) -> None:
+        status = None
+        token = "::status::"
+        if token in message:
+            message, status = message.split(token, 1)
+            message = message.rstrip()
+            status = status.strip()
+        self._emit(ControllerEventType.LOG, {"text": message})
+        if status:
+            self._emit_status(status)
 
     @staticmethod
     def _default_builder(
