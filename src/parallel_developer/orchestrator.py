@@ -742,12 +742,9 @@ class Orchestrator:
         self._tmux.prepare_for_instruction(pane_id=pane_id)
         self._tmux.send_instruction_to_pane(pane_id=pane_id, instruction=instruction)
 
-        if flag_path and selected.session_id:
+        if flag_path:
             self._phase_log("コミット結果を待っています。", status="コミット待ち")
-            self._monitor.await_completion(
-                session_ids=[selected.session_id],
-                signal_paths={selected.session_id: flag_path},
-            )
+            self._wait_for_flag(flag_path)
 
         self._phase_log("コミット報告を受け取りました。", status="マージ処理中")
         self._pull_main_after_auto()
@@ -796,7 +793,7 @@ class Orchestrator:
             "5. 衝突が発生した場合は安全な方法で解消し、解決できなければエラー内容とともに報告",
         ]
         if flag_text:
-            lines.append(f"6. 統合が完了したら `touch {flag_text}` で完了を通知してください。")
+            lines.append(f"6. コミット/統合が完了したら `touch {flag_text}` で完了を通知してください。")
         lines.append("※ 進め方に迷った場合やエラーが発生した場合は状況とログを共有してください。")
         return "\n".join(lines)
 
@@ -819,6 +816,19 @@ class Orchestrator:
                     self._log_hook(message)
                 except Exception:
                     pass
+
+    def _wait_for_flag(self, flag_path: Path, timeout: float = 600.0) -> None:
+        deadline = time.time() + timeout
+        flag_path.parent.mkdir(parents=True, exist_ok=True)
+        while time.time() < deadline:
+            if flag_path.exists():
+                return
+            time.sleep(1.0)
+        if self._log_hook:
+            try:
+                self._log_hook(f"[merge] 完了フラグ {flag_path} が {timeout}s 以内に検出できませんでした。")
+            except Exception:
+                pass
 
     def _phase_log(self, message: str, status: Optional[str] = None) -> None:
         if not self._log_hook:
