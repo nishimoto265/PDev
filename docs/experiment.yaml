@@ -698,6 +698,17 @@
   - pyproject.tomlのproject.nameを`pdev`へ変更し、将来的に`pip install pdev`で導入できるようメタデータを揃えた
   - READMEのセットアップ章を更新し、PyPI経由（pip install pdev → pdev）とソース/ローカル開発パターンを整理
   reproduce:
-  - uv run pytest
+- uv run pytest
   result: tests 122 passed
   notes: PyPI公開は未実施。今後公開すれば`pip install pdev`だけでCLIが起動できる
+- date: '2025-11-10'
+  time_utc: '04:35:13'
+  summary: dev_testへEVENING2実装と互換ラッパーを追加
+  details:
+  - dev_test/25-11-10-13_evening2.pyを新規作成し、run/main構成でGood evening againメッセージと詳細ログを出力
+  - logs/25-11-10-13_evening2.logへstart/message_prepared/message_emitted/completeをDEBUG/INFOで記録するFileHandlerを組み込み
+  - importlib.util経由で実装を読み込む互換ラッパーdev_test/evening2.pyを追加し、指示どおりのファイル名で呼び出せるようにした
+  reproduce:
+  - uv run python dev_test/evening2.py --recipient world
+  result: Good evening again, world!が標準出力に表示され、logs/25-11-10-13_evening2.logへ詳細ログが追記される
+  notes: 将来の実装差し替え時はラッパーのIMPLEMENTATION_FILENAMEを書き換えるだけで互換性を保てる
