@@ -986,6 +986,17 @@
   result: 空リポジトリでもSibyl起動時に `chore: auto-initialized by Sibyl` コミットが作成され、tmuxセッション生成が止まらない
   notes: git configにuser.name/emailが無い環境では従来通り手動コミットが必要
 - date: '2025-11-11'
+  time_utc: '09:16:03'
+  summary: ワーカー指示を即時送信し、rollout検知を後段へ遅延
+  details:
+  - Orchestratorで`_fork_worker_sessions`をワーカーペインのforkだけに限定し、`register_worker_rollouts`は指示送信後に実行
+  - 指示送信がrollout検知を待たずに始まるため、ワーカーのレスポンスが向上
+  - uv run pytest(123件)を再実行し、挙動に問題がないことを確認
+  reproduce:
+  - uv run pytest
+  result: 指示送信と並行してセッション監視を開始する挙動へ変更
+  notes: rollout検知が間に合わない場合は従来通り完了フラグで保護される
+- date: '2025-11-11'
   time_utc: '08:45:00'
   summary: boss統合作業でdev_test helloスクリプトと実験ログを反映
   details:

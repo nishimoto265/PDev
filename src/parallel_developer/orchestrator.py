@@ -170,7 +170,7 @@ class Orchestrator:
             )
 
             baseline = self._monitor.snapshot_rollouts()
-            fork_map = self._fork_worker_sessions(
+            worker_pane_list = self._fork_worker_sessions(
                 layout=layout,
                 main_session_id=main_session_id,
                 baseline=baseline,
@@ -180,6 +180,10 @@ class Orchestrator:
                 layout=layout,
                 user_instruction=instruction,
                 signal_flags=worker_flag_map,
+            )
+            fork_map = self._monitor.register_worker_rollouts(
+                worker_panes=worker_pane_list,
+                baseline=baseline,
             )
             self._active_worker_sessions = [session_id for session_id in fork_map.values() if session_id]
             session_signal_map: Dict[str, Path] = {}
@@ -464,7 +468,7 @@ class Orchestrator:
         layout: CycleLayout,
         main_session_id: str,
         baseline: Mapping[Path, float],
-    ) -> Dict[str, str]:
+    ) -> List[str]:
         worker_paths = {pane_id: layout.pane_to_path[pane_id] for pane_id in layout.worker_panes}
         worker_pane_list = self._tmux.fork_workers(
             workers=layout.worker_panes,
@@ -475,11 +479,7 @@ class Orchestrator:
             "PARALLEL_DEV_PAUSE_AFTER_RESUME",
             "[parallel-dev] Debug pause after worker resume. Inspect tmux panes and press Enter to continue...",
         )
-        fork_map = self._monitor.register_worker_rollouts(
-            worker_panes=worker_pane_list,
-            baseline=baseline,
-        )
-        return fork_map
+        return worker_pane_list
 
     def _dispatch_worker_instructions(
         self,
