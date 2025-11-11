@@ -984,3 +984,13 @@
   - uv run python dev_test/25-11-11-17_hello.py
   result: Hello from dev_test!が表示され、logs/25-11-11-17_hello.logへDEBUGログが出力される
   notes: bossワークスペースでの統合手順を明示して後工程で参照可能にした
+- date: '2025-11-11'
+  time_utc: '08:55:00'
+  summary: boss統合でhello2スクリプトを採用
+  details:
+  - worker-2案の25-11-11-18_hello2.pyをdev_testへ配置し、--name対応の柔軟な挨拶ロジックと詳細DEBUGログを確定
+  - docs/experiment.yamlへ統合作業のログを追記し、再現手順を共有
+  reproduce:
+  - uv run python dev_test/25-11-11-18_hello2.py --name sample
+  result: Hello2 from sample!が標準出力され、logs/25-11-11-18_hello2.logに実行トレースが残る
+  notes: dev_test配下はローカル検証専用のため.gitignore対象のまま管理
