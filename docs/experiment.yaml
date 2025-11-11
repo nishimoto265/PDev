@@ -755,3 +755,101 @@
   - cat dev_test/test2.py
   result: `test`が1行表示される
   notes: 追加処理やフォールバックは不要なため未実装
+- date: '2025-11-11'
+  time_utc: '05:18:51'
+  summary: pipx経由でpdevを再インストールし、どこからでもCLIを起動できるようにした
+  details:
+  - brew install pipxでpipx 1.8.0を導入し、pipx ensurepathで~/.local/binがPATHに含まれていることを確認
+  - 既存pdev venvにメタデータがなくpipx listが失敗していたため、pipx install pdev==0.1.1 --forceで再構築
+  - ~/.local/bin/parallel-dev と ~/.local/bin/pdev がpipx venvを指すシンボリックリンクとして再生成されたことを確認
+  - 新しいログインシェル(zsh -lc 'command -v pdev')でpdevパス解決を確認し、どのディレクトリでも起動できる状態を検証
+  reproduce:
+  - brew install pipx
+  - pipx install pdev==0.1.1 --force
+  - zsh -lc 'command -v pdev'
+  result: `pdev`と`parallel-dev`が~/.local/bin経由で解決され、`pdev`実行でTextual CLIが起動する
+  notes: CLIはインタラクティブなため非対話シェルから動作確認する場合はバックグラウンド実行後に手動で停止する
+- date: '2025-11-11'
+  time_utc: '05:23:16'
+  summary: READMEのセットアップ手順をpipx前提に刷新
+  details:
+  - README.mdの「もっとも簡単な使い方」セクションをpipx推奨フローへ差し替え、未導入ユーザー向けの0番ステップを追加
+  - pipx install / ensurepath / pdevインストール / 動作確認までを順番に説明し、parallel-dev別名とupgradeコマンドを明記
+  - 既存のソースからの開発手順（uv・pip）はそのまま維持し、利用者の導入パスを整理
+  reproduce:
+  - sed -n '1,80p' README.md
+  result: セットアップ章がpipx推奨手順＋ソース開発手順の2段構成になり、pip install手順はREADMEから削除されている
+  notes: pipxはアプリ固有でない前提ツールのため0番ステップ扱いで記載
+- date: '2025-11-11'
+  time_utc: '05:24:02'
+  summary: READMEに2行のクイックスタートを追加
+  details:
+  - pipxが既に導入済みの読者向けに`pipx install pdev==0.1.1`→`pdev`の2行だけで導入できるクイックスタートを冒頭へ追記
+  - その下で「pipx未導入なら0番ステップから」と案内し、既存の詳細手順との接続を明記
+  reproduce:
+  - sed -n '13,50p' README.md
+  result: セットアップ章の冒頭にクイックスタート用コードブロックが追加され、簡潔な導入が可能になった
+  notes: 既存手順と重複しないよう簡潔な説明テキストを添付
+- date: '2025-11-11'
+  time_utc: '05:25:06'
+  summary: README冒頭をクイックスタートのみの構成へ整理
+  details:
+  - セットアップ章のクイックスタート節から0/1/2の詳細手順を削除し、2行コマンド＋補足文のみで完結させた
+  - pipx未導入ユーザー向けには本文末尾でbrew/pip + ensurepathの簡単な案内に留め、本文の主眼をクイックスタートに集中
+  reproduce:
+  - sed -n '13,40p' README.md
+  result: セットアップ章は2行コマンド→補足文というシンプルな形となり、番号付きステップは消えている
+  notes: 詳細なpipx導入手順は文中リンク・補足で十分と判断
+- date: '2025-11-11'
+  time_utc: '05:33:06'
+  summary: README冒頭へスクリーンショットを追加
+  details:
+  - 指定されたファイルをdocs/assets配下へ移動し、命名規則に合わせて25-11-11-14_cli_overview.pngへリネーム
+  - README.mdの先頭に画像埋め込みを追加し、CLI全体像が一目で分かるようにした
+  reproduce:
+  - ls docs/assets
+  - sed -n '1,20p' README.md
+  result: README冒頭に画像タグが挿入され、docs/assets/25-11-11-14_cli_overview.pngを参照している
+  notes: 画像は後続のドキュメントでも使えるようdocs/assetsディレクトリを新設
+- date: '2025-11-11'
+  time_utc: '05:34:15'
+  summary: 一度外れたREADME先頭スクリーンショットを再追加
+  details:
+  - README.mdの冒頭へ `![Parallel Developer CLI screenshot](docs/assets/25-11-11-14_cli_overview.png)` を再度挿入
+  - 既存のdocs/assets/25-11-11-14_cli_overview.pngをそのまま参照し、他の内容には触れていない
+  reproduce:
+  - sed -n '1,10p' README.md
+  result: 見出しの前にスクリーンショットが表示される
+  notes: 誤って削除されたため同じ内容を再適用
+- date: '2025-11-11'
+  time_utc: '05:39:50'
+  summary: 使われていないローカルディレクトリを整理
+  details:
+  - `.parallel-dev/`, `.pytest_cache/`, `.venv/`, `tmp_logs/`, `codex_src/`, `dist/` を削除し、リポジトリ直下を dev_test/docs/src/tests の最小構成へ整理
+  - dist配下のビルド済みアーカイブ（pdev-0.1.1のwheel/tar.gz）は再生成可能なためgit管理から外す方針を共有
+  reproduce:
+  - ls -a
+  - git status -sb
+  result: 余計な一時ディレクトリやパッケージ成果物がなく、リポジトリ直下には dev_test/docs/src/tests など必要最小限のディレクトリのみが残る
+  notes: 必要になれば`uv sync`や`pipx install pdev==0.1.1 --force`で環境再構築可能
+- date: '2025-11-11'
+  time_utc: '05:44:54'
+  summary: 古いバックアップpyprojectを削除
+  details:
+  - ルート直下に残っていた25-11-01-19_pyproject.tomlは現行pyprojectと同一内容のバックアップだったためrmで削除
+  - 無印pyproject.tomlのみを正とし、ビルド・パッケージ手順を一本化
+  reproduce:
+  - ls 25-11-01-19_pyproject.toml  # ファイルが存在しないことを確認
+  result: バックアップファイルは存在せず、pyproject.tomlだけが残る
+  notes: 必要ならgit履歴から復元可能
+- date: '2025-11-11'
+  time_utc: '05:46:10'
+  summary: pyproject.tomlをシンボリックリンクから通常ファイルへ戻した
+  details:
+  - pyproject.tomlが25-11-01-19_pyproject.tomlへのシンボリックリンクだったため、無印ファイルで直接内容を管理するよう再生成
+  - 25-11-01-19_pyproject.tomlをmvでpyproject.tomlへリネームし、ビルドツールがリンク切れにならないように修正
+  reproduce:
+  - ls -l pyproject.toml
+  - head -n 5 pyproject.toml
+  result: pyproject.tomlが通常ファイルとして存在し、symlinkではない
+  notes: 今後バックアップを置く場合はdocs/backups配下などに保管予定

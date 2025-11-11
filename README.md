@@ -1,3 +1,5 @@
+![Parallel Developer CLI screenshot](docs/assets/25-11-11-14_cli_overview.png)
+
 # Parallel Developer CLI
 
 tmux と git worktree を土台に、複数の Codex/LLM エージェントを同じコンテキストで同時起動し、指示・比較・採点・統合までを 1 つの CLI から操作できるツールです。指示を 1 回入力するだけでワーカーが並列に実装し、採点エージェント（Boss）が結果を評価・統合することで、より良い実装案を自動的に得られます。
@@ -11,37 +13,17 @@ tmux と git worktree を土台に、複数の Codex/LLM エージェントを�
 - **フルオートにも対応**: エージェント起動→指示送信→採点→マージ→再開の一連の流れを自動化（Flow/Boss/マージ戦略はコマンドで切り替え）。
 
 ## セットアップ
-### もっとも簡単な使い方（PyPI）
+### クイックスタート
 ```bash
-pip install pdev
-pdev
+pipx install pdev==0.1.1          # 既存インストールを上書きする場合は --force
+pdev                              # 起動、Ctrl+Q で終了
 ```
 
-これだけでCLIが起動し、以降はどこからでも `pdev` コマンドを実行できます。
+`parallel-dev` という別名コマンドも同時にインストールされます。バージョン更新時は `pipx upgrade pdev` を実行してください。pipx 自体がまだなら、macOS なら `brew install pipx && pipx ensurepath`、その他環境なら `python3 -m pip install --user pipx` のあと `pipx ensurepath` を実行し、シェルを再起動して PATH を反映させてください。
 
-### 開発したい場合（ソースから）
-```bash
-git clone https://github.com/nishimoto265/PDev.git parallel-developer
-cd parallel-developer
-
-# 推奨: uv で仮想環境を作成
-uv venv
-uv sync
-
-# CLI を実行
-uv run pdev
-```
-
-**pip のみでローカル開発を行う場合**
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
-pdev
-```
 
 ## 使い方の流れ
-1. `uv run pdev` を起動し、CLI で指示または `/command` を入力。
+1. `pdev` を起動し、CLI で指示または `/command` を入力。
 2. ワーカーが同じコンテキストを共有したまま並列実装。必要に応じて `/parallel <n>` で人数を増減。
 3. Boss（採点エージェント）が自動でスコアリング。rewrite モードでは複数案を踏まえた実装も実施。
 4. スコアに応じて候補を採択し、選ばれたセッションを `codex resume` でメインへリジューム。
