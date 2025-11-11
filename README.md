@@ -15,7 +15,7 @@ tmux と git worktree を土台に、複数の Codex/LLM エージェントを�
 ## セットアップ
 ### クイックスタート
 ```bash
-pipx install pdev==0.1.1          # 既存インストールを上書きする場合は --force
+pipx install pdev==0.1.2          # 既存インストールを上書きする場合は --force
 pdev                              # 起動、Ctrl+Q で終了
 ```
 

@@ -887,3 +887,17 @@
   - sed -n '60,90p' README.md
   result: 新規セッション起動時に`/flow`はfull_auto、`/merge`はautoで開始し、ユーザー設定に保存されていない場合も同じ挙動
   notes: 既存のconfig.yamlを持つユーザーは設定を手動変更するまで以前の値が維持される
+- date: '2025-11-11'
+  time_utc: '06:07:59'
+  summary: テスト群を新デフォルトに追従させ、0.1.2をビルド
+  details:
+  - controller_command_test.pyとworkflow_test.pyでfull_auto/auto前提でも通るようアサーションとセットアップを更新
+  - uv run pytestで122件すべて通過することを確認
+  - pyproject.tomlのversionを0.1.2へ引き上げ、READMEのpipxコマンドも0.1.2に差し替え
+  - uv buildでdist/pdev-0.1.2(whl/tar.gz)を作成し、pipx install dist/pdev-0.1.2-py3-none-any.whl --forceで全体に反映
+  reproduce:
+  - uv run pytest
+  - uv build
+  - pipx install dist/pdev-0.1.2-py3-none-any.whl --force
+  result: テスト122件成功、pipx環境もVersion: 0.1.2に更新済み
+  notes: testsディレクトリはgit管理外のため差分はローカルのみ
