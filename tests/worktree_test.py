@@ -37,10 +37,16 @@ def test_worktree_manager_creates_isolated_worktrees(git_repo: Path):
 
 
 
-def test_worktree_manager_requires_initial_commit(tmp_path: Path):
+def test_worktree_manager_auto_initial_commit(tmp_path: Path):
     repo = git.Repo.init(tmp_path, initial_branch="main")
-    with pytest.raises(RuntimeError):
-        WorktreeManager(root=tmp_path, worker_count=1, session_namespace="session-a")
+    with repo.config_writer() as cw:
+        cw.set_value("user", "name", "Sibyl Bot")
+        cw.set_value("user", "email", "sibyl@example.com")
+
+    manager = WorktreeManager(root=tmp_path, worker_count=1, session_namespace="session-a")
+    manager.prepare()
+
+    assert repo.head.commit.message.strip() == "chore: auto-initialized by Sibyl"
 
 
 def test_worktree_manager_separates_sessions(git_repo: Path):

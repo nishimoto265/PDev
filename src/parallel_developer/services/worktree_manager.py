@@ -69,9 +69,17 @@ class WorktreeManager:
         try:
             _ = self._repo.head.commit  # type: ignore[attr-defined]
         except ValueError as exc:
-            raise RuntimeError(
-                "Git repository has no commits. Create an initial commit before running parallel-dev."
-            ) from exc
+            try:
+                self._repo.git.commit(
+                    "--allow-empty",
+                    "-m",
+                    "chore: auto-initialized by Sibyl",
+                )
+            except git.GitCommandError as commit_exc:
+                raise RuntimeError(
+                    "Git repository has no commits and automatic initialization failed. "
+                    "Please create an initial commit manually."
+                ) from commit_exc
 
     def _recreate_worktree(self, path: Path, branch_name: str) -> None:
         if path.exists():

@@ -975,6 +975,17 @@
   result: 123 passed、指示からワーカー指示開始までのラグが大幅に減少
   notes: さらに短縮したい場合はSettingsStore側でpoll_intervalを設定できる拡張を検討
 - date: '2025-11-11'
+  time_utc: '09:00:43'
+  summary: Git初期化が未完のリポジトリで自動初期コミットを作成
+  details:
+  - WorktreeManager._ensure_repo_initializedでHEADが無い場合に`git commit --allow-empty`を実行し、Sibyl側で初期コミットを自動作成
+  - commitが失敗した場合のみ従来通りRuntimeErrorを投げるようガードを追加
+  - tests/worktree_test.pyにauto-initializationの検証を追加し、ユーザー名/メール設定があれば自動コミットされることを確認
+  reproduce:
+  - uv run pytest tests/worktree_test.py::test_worktree_manager_auto_initial_commit
+  result: 空リポジトリでもSibyl起動時に `chore: auto-initialized by Sibyl` コミットが作成され、tmuxセッション生成が止まらない
+  notes: git configにuser.name/emailが無い環境では従来通り手動コミットが必要
+- date: '2025-11-11'
   time_utc: '08:45:00'
   summary: boss統合作業でdev_test helloスクリプトと実験ログを反映
   details:
