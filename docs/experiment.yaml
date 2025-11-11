@@ -990,8 +990,10 @@
   summary: ワーカー指示を即時送信し、rollout検知を後段へ遅延
   details:
   - Orchestratorで`_fork_worker_sessions`をワーカーペインのforkだけに限定し、`register_worker_rollouts`は指示送信後に実行
+  - CodexMonitorでsession_meta未出力時にunknown IDを返さず、`refresh_session_id`で実IDへ差し替える `_await_real_session_id` を追加
+  - register_new_rollout/register_worker_rolloutsの両方で確定したセッションIDのみ返すよう変更し、`codex resume unknown-XXXX` を防止
   - 指示送信がrollout検知を待たずに始まるため、ワーカーのレスポンスが向上
-  - uv run pytest(123件)を再実行し、挙動に問題がないことを確認
+  - uv run pytest(125件)を再実行し、挙動に問題がないことを確認
   reproduce:
   - uv run pytest
   result: 指示送信と並行してセッション監視を開始する挙動へ変更

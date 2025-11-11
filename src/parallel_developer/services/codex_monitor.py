@@ -216,7 +216,7 @@ class CodexMonitor:
                     )
                 except SessionReservationError:
                     continue
-                return session_id
+                return self._await_real_session_id(session_id)
 
         raise TimeoutError("Failed to detect available Codex session rollout")
 
@@ -261,7 +261,7 @@ class CodexMonitor:
                     self.register_session(pane_id=pane_id, session_id=session_id, rollout_path=path)
                 except SessionReservationError:
                     continue
-                fork_map[pane_id] = session_id
+                fork_map[pane_id] = self._await_real_session_id(session_id)
                 if len(fork_map) == len(worker_panes):
                     break
 
@@ -560,6 +560,18 @@ class CodexMonitor:
             return session_id
         suffix = int(time.time() * 1000)
         return f"unknown-{suffix}"
+
+    def _await_real_session_id(self, session_id: str, *, timeout: float = 5.0) -> str:
+        if not session_id.startswith("unknown-"):
+            return session_id
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            refreshed = self.refresh_session_id(session_id)
+            if refreshed != session_id:
+                return refreshed
+            time.sleep(self.poll_interval)
+        return session_id
+
 
     def _wait_for_session_identifier(
         self,
