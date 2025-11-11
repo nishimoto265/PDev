@@ -963,3 +963,14 @@
   - pipx runpip sibyl-cli show sibyl-cli | grep Version
   result: インストール可能なコマンドは`sibyl`のみになり、PyPI上の`sibyl-cli 0.2.1`を`pipx install sibyl-cli==0.2.1`で取得できる
   notes: `.parallel-dev` ディレクトリ名など内部構造は互換のため据え置き
+- date: '2025-11-11'
+  time_utc: '08:28:03'
+  summary: ワーカー完了待ちのポーリング間隔を高速化
+  details:
+  - CodexMonitorのpoll_interval既定値を1.0s→0.05sへ変更し、完了/ログ検出の待機を短縮
+  - オーケストレータの完了フラグ監視(_wait_for_flag)もmonitor.poll_intervalに連動させ、1s刻みのsleepを解消
+  - uv run pytest (123件) で副作用がないことを確認
+  reproduce:
+  - uv run pytest
+  result: 123 passed、指示からワーカー指示開始までのラグが大幅に減少
+  notes: さらに短縮したい場合はSettingsStore側でpoll_intervalを設定できる拡張を検討

@@ -32,7 +32,7 @@ class CodexMonitor:
         session_map_path: Path,
         *,
         codex_sessions_root: Optional[Path] = None,
-        poll_interval: float = 1.0,
+        poll_interval: float = 0.05,
         session_namespace: Optional[str] = None,
     ) -> None:
         self.logs_dir = Path(logs_dir)

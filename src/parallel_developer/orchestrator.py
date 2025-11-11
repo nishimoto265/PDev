@@ -872,12 +872,19 @@ class Orchestrator:
             pass
 
     def _wait_for_flag(self, flag_path: Path, timeout: float = 600.0) -> None:
+        poll = getattr(self._monitor, "poll_interval", 0.05)
+        try:
+            interval = float(poll)
+            if interval <= 0:
+                interval = 0.05
+        except (TypeError, ValueError):
+            interval = 0.05
         deadline = time.time() + timeout
         flag_path.parent.mkdir(parents=True, exist_ok=True)
         while time.time() < deadline:
             if flag_path.exists():
                 return
-            time.sleep(1.0)
+            time.sleep(interval)
         if self._log_hook:
             try:
                 self._log_hook(f"[merge] 完了フラグ {flag_path} が {timeout}s 以内に検出できませんでした。")
