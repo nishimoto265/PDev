@@ -874,3 +874,16 @@
   - sed -n '60,90p' README.md
   result: /flowと/bossの各モードが具体的に説明され、他コマンドと同じ書きぶりになった
   notes: CLI上のコマンドオプション説明と揃えてREADMEで迷わないようにするため
+- date: '2025-11-11'
+  time_utc: '05:59:20'
+  summary: デフォルトをfull_auto / autoマージに変更
+  details:
+  - CLI初期化時のSessionConfigでflow_mode=full_auto, merge_mode=autoをセットし、SettingsStoreの既定値も合わせて更新
+  - config.yamlを読み込む際のフォールバック値や_merge正規化関数を更新し、新規環境では自動モードが選ばれるようにした
+  - READMEの`/flow`および`/merge`節に「(デフォルト)」表記を追加してドキュメントとも整合
+  reproduce:
+  - rg "flow_mode" -n src/parallel_developer/controller/__init__.py
+  - head -n 40 src/parallel_developer/stores/settings_store.py
+  - sed -n '60,90p' README.md
+  result: 新規セッション起動時に`/flow`はfull_auto、`/merge`はautoで開始し、ユーザー設定に保存されていない場合も同じ挙動
+  notes: 既存のconfig.yamlを持つユーザーは設定を手動変更するまで以前の値が維持される

@@ -47,11 +47,11 @@ def resolve_worktree_root(config_value: Optional[str], fallback: Path) -> Path:
 class SettingsData:
     attach: str = "auto"
     boss: str = "score"
-    flow: str = "manual"
+    flow: str = "full_auto"
     parallel: str = "3"
     mode: str = "parallel"
     commit: str = "manual"
-    merge: str = "manual"
+    merge: str = "auto"
     worktree_root: Optional[str] = None
 
 
@@ -66,10 +66,10 @@ class SettingsStore:
     @staticmethod
     def _normalize_merge(value: Optional[str]) -> str:
         if value is None:
-            return "manual"
+            return "auto"
         token = str(value).strip().lower()
         if token not in {"manual", "auto"}:
-            return "manual"
+            return "auto"
         return token
 
     @property
@@ -212,7 +212,7 @@ class SettingsStore:
             return SettingsData(
                 attach=str(commands.get("attach", "auto")),
                 boss=str(commands.get("boss", "score")),
-                flow=str(commands.get("flow", "manual")),
+                flow=str(commands.get("flow", "full_auto")),
                 parallel=str(commands.get("parallel", "3")),
                 mode=str(commands.get("mode", "parallel")),
                 commit=str(commands.get("commit", "manual")),
@@ -224,11 +224,11 @@ class SettingsStore:
         return SettingsData(
             attach=str(payload.get("attach_mode", "auto")),
             boss=str(payload.get("boss_mode", "score")),
-            flow=str(payload.get("flow_mode", "manual")),
+            flow=str(payload.get("flow_mode", "full_auto")),
             parallel=str(payload.get("worker_count", "3")),
             mode=str(payload.get("session_mode", "parallel")),
             commit="auto" if bool(payload.get("auto_commit", False)) else "manual",
-            merge="manual",
+            merge="auto",
             worktree_root=None,
         )
 

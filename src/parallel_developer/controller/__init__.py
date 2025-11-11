@@ -242,13 +242,13 @@ class CLIController:
         try:
             self._flow_mode = FlowMode(saved_flow_mode)
         except ValueError:
-            self._flow_mode = FlowMode.MANUAL
+            self._flow_mode = FlowMode.FULL_AUTO
         self._config.flow_mode = self._flow_mode
         saved_merge_mode = self._settings_store.merge
         try:
             self._merge_mode = MergeMode(saved_merge_mode)
         except ValueError:
-            self._merge_mode = MergeMode.MANUAL
+            self._merge_mode = MergeMode.AUTO
         self._config.merge_mode = self._merge_mode
         self._auto_commit_enabled: bool = self._settings_store.commit == "auto"
         try:
@@ -1187,8 +1187,8 @@ class CLIController:
             mode=SessionMode.PARALLEL,
             logs_root=logs_root,
             boss_mode=BossMode.SCORE,
-            flow_mode=FlowMode.MANUAL,
-            merge_mode=MergeMode.MANUAL,
+            flow_mode=FlowMode.FULL_AUTO,
+            merge_mode=MergeMode.AUTO,
         )
 
     def _create_cycle_logs_dir(self) -> Path:
