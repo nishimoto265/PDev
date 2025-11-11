@@ -974,3 +974,13 @@
   - uv run pytest
   result: 123 passed、指示からワーカー指示開始までのラグが大幅に減少
   notes: さらに短縮したい場合はSettingsStore側でpoll_intervalを設定できる拡張を検討
+- date: '2025-11-11'
+  time_utc: '08:45:00'
+  summary: boss統合作業でdev_test helloスクリプトと実験ログを反映
+  details:
+  - worker-1案の25-11-11-17_hello.pyをdev_testへ取り込み、詳細ログ付きのHello実装を確定
+  - docs/experiment.yamlへ本統合作業の記録を追記し、再現手順を共有
+  reproduce:
+  - uv run python dev_test/25-11-11-17_hello.py
+  result: Hello from dev_test!が表示され、logs/25-11-11-17_hello.logへDEBUGログが出力される
+  notes: bossワークスペースでの統合手順を明示して後工程で参照可能にした
