@@ -1,6 +1,6 @@
 [project]
 name = "pdev"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI orchestrator for parallel Codex agents with tmux and git worktree integration."
 authors = [{ name = "Parallel Developer Team" }]
 requires-python = ">=3.11"
@@ -34,9 +34,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/parallel_developer"]
-
-[tool.hatch.build.targets.sdist]
-include = ["pyproject.toml", "src", "tests", "docs", "README.md"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config"
