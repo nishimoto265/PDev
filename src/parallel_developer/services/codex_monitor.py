@@ -251,7 +251,12 @@ class CodexMonitor:
                 if pane_index >= len(worker_panes):
                     break
                 pane_id = worker_panes[pane_index]
-                session_id = self._parse_session_meta(path)
+                session_id = self._wait_for_session_identifier(
+                    path,
+                    self._parse_session_meta(path),
+                    timeout_seconds=min(2.0, remaining),
+                )
+                session_id = self._await_real_session_id(session_id)
                 session_id = self._wait_for_session_identifier(
                     path,
                     session_id,
