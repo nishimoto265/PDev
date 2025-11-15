@@ -1072,3 +1072,13 @@
   - uv run pytest tests/orchestrator_test.py tests/controller_command_test.py tests/worktree_test.py
   result: 36 tests passed
   notes: dist/sibyl_cli-0.2.3-*.whl/tar.gz を uv publish で PyPI へアップロード済み、pipx install dist/sibyl_cli-0.2.3-py3-none-any.whl --force でローカルも更新
+- date: '2025-11-15'
+  time_utc: '09:51:37'
+  summary: READMEに必須前提条件と対象環境の情報を追記
+  details:
+  - README.mdのセットアップ章へtmux/git/Codex依存とmacOS・Linuxでの動作確認状況を追加
+  - Codex専用である点を明記し、Windows未検証である旨を記載
+  reproduce:
+  - uv run pytest
+  result: tests 127 passed
+  notes: ドキュメント更新のみだが、全テストを実行して既存コードへの影響がないことを確認

@@ -13,6 +13,11 @@ tmux と git worktree を土台に、複数の Codex/LLM エージェントを�
 - **フルオートにも対応**: エージェント起動→指示送信→採点→マージ→再開の一連の流れを自動化（Flow/Boss/マージ戦略はコマンドで切り替え）。
 
 ## セットアップ
+### 前提条件
+- `tmux` 3.x 以上と `git` (worktree が利用可能な 2.23 以上) をあらかじめ用意してください。Sibyl CLI は tmux セッション分割と git worktree の自動生成を前提にしているため、未インストールの場合は動作しません。
+- Codex CLI (`codex ...`) を唯一の実行ターゲットとして設計されています。他の LLM/CLI フロントエンドはサポート外です。
+- 開発チームでは macOS (Apple Silicon) と Linux (Ubuntu 22.04 LTS) で動作確認済みです。Windows は未検証です。
+
 ### クイックスタート
 ```bash
 pipx install sibyl-cli==0.2.3     # 既存インストールを上書きする場合は --force
