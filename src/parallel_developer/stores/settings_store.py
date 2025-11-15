@@ -68,7 +68,7 @@ class SettingsStore:
         if value is None:
             return "auto"
         token = str(value).strip().lower()
-        if token not in {"manual", "auto"}:
+        if token not in {"manual", "auto", "full_auto"}:
             return "auto"
         return token
 

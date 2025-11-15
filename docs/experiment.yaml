@@ -1018,3 +1018,57 @@
   - uv run python dev_test/25-11-11-18_hello2.py --name sample
   result: Hello2 from sample!が標準出力され、logs/25-11-11-18_hello2.logに実行トレースが残る
   notes: dev_test配下はローカル検証専用のため.gitignore対象のまま管理
+- date: '2025-11-13'
+  time_utc: '07:45:00'
+  summary: ローカル専用マージパイプラインと/merge full_autoを実装
+  details:
+  - Orchestratorの自動統合処理をホスト側パイプライン（git add/commit→git merge --ff-only）へ切り替え、リモートpull/pushやエージェントコミットを廃止
+  - `/merge` コマンドを manual / auto / full_auto の3段階に再設計し、full_autoではfast-forward失敗時のみエージェントへブランチ調整を依頼後に自動再トライする挙動を追加
+  - README、docs/requirement.yaml、CLIログ文言を新仕様に合わせて更新し、tests/orchestrator_test.py / tests/controller_command_test.py を書き換えて `uv run pytest` で成功を確認
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py tests/controller_command_test.py
+  result: 2ファイルのテストがいずれもPASSし、autoモードはホストのみで統合・full_autoは失敗時にエージェントへフォールバックする挙動を確認
+  notes: `_pull_main_after_auto` はレガシー呼び出し互換用のNOPとして残しつつ、新しいケースはホスト側パイプラインが完全に担当
+- date: '2025-11-13'
+  time_utc: '08:05:00'
+  summary: ホスト統合時のクリーンチェックを緩和し、dirty環境でもマージを試行
+  details:
+  - `_ensure_root_clean` を撤廃し、auto/full_auto のホストパイプラインが作業ツリーに未コミット変更があっても `git merge --ff-only` を実行するよう変更
+  - 衝突する変更があればGitがエラーを出し、full_autoでは既存のエージェントfallbackが発火するため安全性は維持
+  - `.parallel-dev` をコミット管理している環境でも自動統合が止まらなくなったことを確認
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py tests/controller_command_test.py
+  result: 31 tests passed
+  notes: ルートのクリーンチェックはGitの警告に任せ、Sibyl側では追加メッセージを出さない
+- date: '2025-11-13'
+  time_utc: '08:20:00'
+  summary: sibyl-cli 0.2.2 をリリース
+  details:
+  - pyproject.toml と src/parallel_developer/__init__.py のバージョンを 0.2.2 へ更新し、README クイックスタートのインストール例も 0.2.2 に差し替え
+  - auto/full_auto のローカル統合改善を含む最新版を `uv run pytest tests/orchestrator_test.py tests/controller_command_test.py` で検証
+  - `uv build` で 0.2.2 の sdist / wheel を再生成し、`uv publish dist/sibyl_cli-0.2.2-*.{whl,tar.gz}` で PyPI へアップロード
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py tests/controller_command_test.py
+  result: 31 tests passed
+  notes: pipx install dist/sibyl_cli-0.2.2-py3-none-any.whl --force でローカルも更新済み
+- date: '2025-11-13'
+  time_utc: '08:32:00'
+  summary: Gitリポジトリ未初期化のディレクトリでも自動init
+  details:
+  - WorktreeManager.__init__ で git.Repo(...) が InvalidGitRepositoryError を投げた場合に self.root へ自動的に git init を実行する処理を追加
+  - tests/worktree_test.py に未初期化ディレクトリを対象にした回帰テストを追加し、env の GIT_AUTHOR_* を使って auto-initialized コミットが作成されることを確認
+  - CLIController._perform_commit でも同様に git init を自動実行し、/commit や auto-commit で `git init` メッセージを出さずに済むようにした（tests/controller_command_test.py へ検証を追加）
+  reproduce:
+  - uv run pytest tests/worktree_test.py tests/controller_command_test.py::test_commit_command_auto_inits_repo
+  result: 各テストが pass
+  notes: これで git init をユーザーが手動実行しなくてもセッションを開始できる
+- date: '2025-11-15'
+  time_utc: '09:05:00'
+  summary: sibyl-cli 0.2.3 をリリース（自動git init強化）
+  details:
+  - WorktreeManagerとCLIControllerの両方で未初期化ディレクトリを検出したら自動で `git init` するようになったことを反映し、pyproject/README/__init__ のバージョンを0.2.3へ更新
+  - tests/orchestrator_test.py / tests/controller_command_test.py / tests/worktree_test.py を `uv run pytest` で再実行して、auto/full_autoマージ＋自動コミット＋ワークツリー初期化がすべて通ることを確認
+  reproduce:
+  - uv run pytest tests/orchestrator_test.py tests/controller_command_test.py tests/worktree_test.py
+  result: 36 tests passed
+  notes: dist/sibyl_cli-0.2.3-*.whl/tar.gz を uv publish で PyPI へアップロード済み、pipx install dist/sibyl_cli-0.2.3-py3-none-any.whl --force でローカルも更新

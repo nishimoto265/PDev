@@ -49,6 +49,19 @@ def test_worktree_manager_auto_initial_commit(tmp_path: Path):
     assert repo.head.commit.message.strip() == "chore: auto-initialized by Sibyl"
 
 
+def test_worktree_manager_initializes_missing_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Sibyl Bot")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "sibyl@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Sibyl Bot")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "sibyl@example.com")
+
+    manager = WorktreeManager(root=tmp_path, worker_count=1, session_namespace="session-auto")
+    manager.prepare()
+
+    repo = git.Repo(tmp_path)
+    assert repo.head.commit.message.strip() == "chore: auto-initialized by Sibyl"
+
+
 def test_worktree_manager_separates_sessions(git_repo: Path):
     manager_a = WorktreeManager(root=git_repo, worker_count=1, session_namespace="session-a")
     mapping_a = manager_a.prepare()

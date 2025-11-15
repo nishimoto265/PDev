@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from typing import Any, List, Mapping
 from unittest.mock import Mock, call
-import subprocess
 
 import pytest
 
@@ -10,6 +9,9 @@ from parallel_developer.orchestrator import (
     CandidateInfo,
     BossMode,
     MergeMode,
+    MergeConflictError,
+    IntegrationError,
+    MergeOutcome,
     Orchestrator,
     SelectionDecision,
     WorkerDecision,
@@ -237,35 +239,12 @@ def test_boss_branch_delegates_in_rewrite_mode():
     assert log_hook.call_args_list == [call("[phase] メインセッションを再開しました。 ::status::再開中")]
 
 
-def test_auto_merge_requests_agent_commit(tmp_path):
+def test_host_merge_pipeline_success(monkeypatch, tmp_path):
     tmux = Mock()
     worktree = Mock()
+    worktree.root = tmp_path
     monitor = Mock()
-    monitor.await_completion.return_value = {"session-worker-1": {"done": True}}
     log_manager = Mock()
-    flag_path = tmp_path / "worker-1.done"
-    signal_paths = SignalPaths(
-        cycle_id="cycle",
-        root=tmp_path,
-        worker_flags={"worker-1": flag_path},
-        boss_flag=tmp_path / "boss.done",
-    )
-    layout = CycleLayout(
-        main_pane="pane-main",
-        boss_pane="pane-boss",
-        worker_panes=["pane-worker"],
-        worker_names=["worker-1"],
-        pane_to_worker={"pane-worker": "worker-1"},
-        pane_to_path={"pane-worker": Path("/repo/worker-1")},
-    )
-    candidate = CandidateInfo(
-        key="worker-1",
-        label="worker-1",
-        session_id="session-worker-1",
-        branch="parallel-dev/session-a/worker-1",
-        worktree=Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
-        pane_id="pane-worker",
-    )
     orchestrator = Orchestrator(
         tmux_manager=tmux,
         worktree_manager=worktree,
@@ -275,131 +254,184 @@ def test_auto_merge_requests_agent_commit(tmp_path):
         session_name="parallel-dev",
         merge_mode=MergeMode.AUTO,
     )
-    orchestrator._active_signals = signal_paths
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        pane_id="pane-worker",
+    )
+    layout = CycleLayout(
+        main_pane="pane-main",
+        boss_pane="pane-boss",
+        worker_panes=["pane-worker"],
+        worker_names=["worker-1"],
+        pane_to_worker={"pane-worker": "worker-1"},
+        pane_to_path={"pane-worker": candidate.worktree},
+    )
 
-    import threading
-    import time
+    called = {}
 
-    def touch_flag():
-        time.sleep(0.1)
-        flag_path.touch()
+    def fake_pipeline(selected):
+        called["selected"] = selected
 
-    threading.Thread(target=touch_flag, daemon=True).start()
+    monkeypatch.setattr(orchestrator, "_run_host_pipeline", fake_pipeline)
 
-    merge_outcome = orchestrator._auto_commit_and_finalize(
+    outcome = orchestrator._host_merge_pipeline(selected=candidate, layout=layout, signal_paths=None)
+
+    assert called["selected"] == candidate
+    assert outcome.status == "merged"
+    assert outcome.reason == "host_pipeline"
+
+
+def test_host_merge_pipeline_failure_returns_failed_outcome(monkeypatch, tmp_path):
+    tmux = Mock()
+    worktree = Mock()
+    worktree.root = tmp_path
+    monitor = Mock()
+    log_manager = Mock()
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_mode=MergeMode.AUTO,
+    )
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        pane_id="pane-worker",
+    )
+    layout = CycleLayout(
+        main_pane="pane-main",
+        boss_pane="pane-boss",
+        worker_panes=["pane-worker"],
+        worker_names=["worker-1"],
+        pane_to_worker={"pane-worker": "worker-1"},
+        pane_to_path={"pane-worker": candidate.worktree},
+    )
+
+    def raise_integration(_):
+        raise IntegrationError("root dirty")
+
+    monkeypatch.setattr(orchestrator, "_run_host_pipeline", raise_integration)
+
+    outcome = orchestrator._host_merge_pipeline(selected=candidate, layout=layout, signal_paths=None)
+
+    assert outcome.status == "failed"
+    assert "root dirty" in (outcome.error or "")
+
+
+def test_full_auto_conflict_delegates_to_agent(monkeypatch, tmp_path):
+    tmux = Mock()
+    worktree = Mock()
+    worktree.root = tmp_path
+    monitor = Mock()
+    log_manager = Mock()
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_mode=MergeMode.FULL_AUTO,
+    )
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        pane_id="pane-worker",
+    )
+    layout = CycleLayout(
+        main_pane="pane-main",
+        boss_pane="pane-boss",
+        worker_panes=["pane-worker"],
+        worker_names=["worker-1"],
+        pane_to_worker={"pane-worker": "worker-1"},
+        pane_to_path={"pane-worker": candidate.worktree},
+    )
+
+    def raise_conflict(_):
+        raise MergeConflictError("ff-only failed")
+
+    monkeypatch.setattr(orchestrator, "_run_host_pipeline", raise_conflict)
+    delegated = MergeOutcome(strategy=MergeMode.FULL_AUTO, status="merged")
+    monkeypatch.setattr(
+        orchestrator,
+        "_delegate_branch_fix_and_retry",
+        lambda **kwargs: delegated,
+    )
+
+    outcome = orchestrator._host_merge_pipeline(selected=candidate, layout=layout, signal_paths=None)
+    assert outcome is delegated
+
+
+def test_delegate_branch_fix_and_retry_runs_pipeline(monkeypatch, tmp_path):
+    tmux = Mock()
+    worktree = Mock()
+    worktree.root = tmp_path
+    monitor = Mock()
+    log_manager = Mock()
+    orchestrator = Orchestrator(
+        tmux_manager=tmux,
+        worktree_manager=worktree,
+        monitor=monitor,
+        log_manager=log_manager,
+        worker_count=1,
+        session_name="parallel-dev",
+        merge_mode=MergeMode.FULL_AUTO,
+    )
+    flag_path = tmp_path / "worker-1.done"
+    signal_paths = SignalPaths(
+        cycle_id="cycle",
+        root=tmp_path,
+        worker_flags={"worker-1": flag_path},
+        boss_flag=tmp_path / "boss.done",
+    )
+    candidate = CandidateInfo(
+        key="worker-1",
+        label="worker-1",
+        session_id="session-worker-1",
+        branch="parallel-dev/session-a/worker-1",
+        worktree=Path("/repo/.parallel-dev/sessions/session-a/worktrees/worker-1"),
+        pane_id="pane-worker",
+    )
+    layout = CycleLayout(
+        main_pane="pane-main",
+        boss_pane="pane-boss",
+        worker_panes=["pane-worker"],
+        worker_names=["worker-1"],
+        pane_to_worker={"pane-worker": "worker-1"},
+        pane_to_path={"pane-worker": candidate.worktree},
+    )
+
+    calls = {"pipeline": 0}
+    monkeypatch.setattr(orchestrator, "_wait_for_flag", lambda path: path.touch())
+
+    def fake_pipeline(selected):
+        calls["pipeline"] += 1
+
+    monkeypatch.setattr(orchestrator, "_run_host_pipeline", fake_pipeline)
+
+    outcome = orchestrator._delegate_branch_fix_and_retry(
         selected=candidate,
         layout=layout,
         signal_paths=signal_paths,
+        failure_reason="ff-only failed",
     )
 
-    tmux.send_instruction_to_pane.assert_called_once()
-    monitor.await_completion.assert_not_called()
-    assert merge_outcome.status == "delegate"
-    assert merge_outcome.reason == "agent_auto"
-
-
-def test_pull_main_after_auto_rebases_on_ff_failure(tmp_path, monkeypatch):
-    tmux = Mock()
-    worktree = Mock()
-    monitor = Mock()
-    log_manager = Mock()
-    logs: list[str] = []
-    worktree.root = tmp_path
-    orchestrator = Orchestrator(
-        tmux_manager=tmux,
-        worktree_manager=worktree,
-        monitor=monitor,
-        log_manager=log_manager,
-        worker_count=1,
-        session_name="parallel-dev",
-        log_hook=logs.append,
-    )
-
-    recorded: list[list[str]] = []
-
-    def fake_run(args, **kwargs):  # type: ignore[override]
-        recorded.append(list(args))
-        if "--ff-only" in args:
-            raise subprocess.CalledProcessError(1, args, stderr="ff-only failed")
-        if "rev-parse" in args:
-            return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
-        if "--rebase" in args:
-            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-        raise AssertionError(f"Unexpected command: {args}")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    orchestrator._pull_main_after_auto()
-
-    assert any("--ff-only" in call for call in recorded)
-    assert any("rev-parse" in call for call in recorded)
-    assert any("--rebase" in call for call in recorded)
-    assert len(logs) == 2
-    assert "ff-only failed" in logs[0]
-    assert "git pull --rebase origin main で main を同期" in logs[1]
-
-
-def test_pull_main_after_auto_logs_conflict(tmp_path, monkeypatch):
-    tmux = Mock()
-    worktree = Mock()
-    monitor = Mock()
-    log_manager = Mock()
-    logs: list[str] = []
-    worktree.root = tmp_path
-    orchestrator = Orchestrator(
-        tmux_manager=tmux,
-        worktree_manager=worktree,
-        monitor=monitor,
-        log_manager=log_manager,
-        worker_count=1,
-        session_name="parallel-dev",
-        log_hook=logs.append,
-    )
-
-    def fake_run(args, **kwargs):  # type: ignore[override]
-        if "--ff-only" in args:
-            raise subprocess.CalledProcessError(1, args, stderr="ff-only failed")
-        if "rev-parse" in args:
-            return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
-        if "--rebase" in args:
-            raise subprocess.CalledProcessError(1, args, stderr="CONFLICT (content): file.txt")
-        raise AssertionError(f"Unexpected command: {args}")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    orchestrator._pull_main_after_auto()
-
-    assert any("pull --rebase origin main が失敗" in entry for entry in logs)
-    assert any("ff-only failed" in entry for entry in logs)
-
-
-def test_pull_main_after_auto_logs_ff_success(tmp_path, monkeypatch):
-    tmux = Mock()
-    worktree = Mock()
-    monitor = Mock()
-    log_manager = Mock()
-    logs: list[str] = []
-    worktree.root = tmp_path
-    orchestrator = Orchestrator(
-        tmux_manager=tmux,
-        worktree_manager=worktree,
-        monitor=monitor,
-        log_manager=log_manager,
-        worker_count=1,
-        session_name="parallel-dev",
-        log_hook=logs.append,
-    )
-
-    def fake_run(args, **kwargs):  # type: ignore[override]
-        if "--ff-only" in args:
-            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-        raise AssertionError(f"Unexpected command: {args}")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    orchestrator._pull_main_after_auto()
-
-    assert logs == ["[merge] ホスト側 git pull --ff-only で main を同期しました。"]
+    assert calls["pipeline"] == 1
+    assert outcome.status == "merged"
+    assert outcome.reason == "agent_fallback"
 
 
 def test_orchestrator_handles_worker_continuation(dependencies):

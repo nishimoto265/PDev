@@ -71,14 +71,19 @@ def build_command_specs(
             controller._cmd_merge,
             options=[
                 CommandOption(
-                    "manual - ホストが従来どおりマージ",
+                    "manual - 完全手動で統合",
                     MergeMode.MANUAL.value,
-                    "ホスト側がFast-Forwardなどを実行",
+                    "統合パイプラインを一切実行しません",
                 ),
                 CommandOption(
-                    "auto - エージェントがコミット・統合作業",
+                    "auto - ホストパイプラインで統合",
                     MergeMode.AUTO.value,
-                    "採択エージェントにコミット/統合手順を送る",
+                    "ホストがステージング/コミット/fast-forward 統合を行い、失敗したら停止",
+                ),
+                CommandOption(
+                    "full_auto - 失敗時だけエージェント支援",
+                    MergeMode.FULL_AUTO.value,
+                    "ホストパイプラインを試み、fast-forward できない場合はエージェントに調整を依頼",
                 ),
             ],
         ),

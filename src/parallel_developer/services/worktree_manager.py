@@ -22,7 +22,11 @@ class WorktreeManager:
         self.root = Path(root)
         self.worker_count = worker_count
         self.session_namespace = session_namespace
-        self._repo = git.Repo(self.root)
+        try:
+            self._repo = git.Repo(self.root)
+        except git.exc.InvalidGitRepositoryError:
+            self.root.mkdir(parents=True, exist_ok=True)
+            self._repo = git.Repo.init(self.root)
         self._ensure_repo_initialized()
         self._storage_root = Path(storage_root) if storage_root is not None else self.root
         self._session_root = self._resolve_session_root()

@@ -15,7 +15,7 @@ tmux と git worktree を土台に、複数の Codex/LLM エージェントを�
 ## セットアップ
 ### クイックスタート
 ```bash
-pipx install sibyl-cli==0.2.1     # 既存インストールを上書きする場合は --force
+pipx install sibyl-cli==0.2.3     # 既存インストールを上書きする場合は --force
 sibyl                             # 起動、Ctrl+Q で終了
 ```
 
@@ -74,9 +74,10 @@ sibyl                             # 起動、Ctrl+Q で終了
 - `score`: Bossが採点のみ担当し、最終統合はホストが行う。デフォルト動作。
 - `rewrite`: Bossが採点後に自ら統合/再実装も行い、候補の1つとして提示する。統合作業を任せたいときに。
 
-### `/merge`
-- `manual`: これまで通りホスト側がFast-Forwardで統合します。
-- `auto` (デフォルト): 採択されたエージェントに「git add/commit→mainへFast-Forward→完了フラグ」の手順を送ってからマージします。
+### `/merge [manual|auto|full_auto]`
+- `manual`: 統合パイプラインを実行せず、ユーザーが手動でコミット/マージします。
+- `auto` (デフォルト): ホストが決まったパイプライン（`git add -A`→`git commit`→`git merge --ff-only`）でローカル統合し、失敗したらそこで停止します。
+- `full_auto`: `auto` と同じパイプラインを試み、fast-forward できなかった場合は採択エージェントにブランチ調整を依頼してから自動で再トライします。
 
 ### `/continue` と `/done`
 - `/continue`: 完了扱いになったワーカーを再び動かし、ユーザーが追加入力した内容をそのまま送ります。

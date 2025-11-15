@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
+import git
+
 import pytest
 import yaml
 
@@ -111,6 +113,34 @@ def test_merge_command(controller, event_recorder):
     _run(controller.execute_command("/merge", "invalid"))
     assert any("使い方" in payload.get("text", "") for event, payload in events if event == "log")
 
+    events.clear()
+    _run(controller.execute_command("/merge", "full_auto"))
+    assert controller._merge_mode == MergeMode.FULL_AUTO
+    assert any("マージ戦略を" in payload.get("text", "") for event, payload in events if event == "log")
+
+
+def test_commit_command_auto_inits_repo(tmp_path, event_recorder, monkeypatch):
+    events, handler = event_recorder
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Sibyl Bot")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "sibyl@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Sibyl Bot")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "sibyl@example.com")
+
+    ctrl = CLIController(
+        event_handler=handler,
+        orchestrator_builder=lambda **_: Mock(),
+        manifest_store=DummyManifestStore(),
+        worktree_root=tmp_path,
+    )
+    ctrl._emit = lambda event, payload: events.append((event, payload))
+    (tmp_path / "demo.txt").write_text("hello", encoding="utf-8")
+
+    _run(ctrl.execute_command("/commit", "manual"))
+
+    repo = git.Repo(tmp_path)
+    assert repo.head.commit.message.startswith("sibyl-manual-save")
+    assert any("変更をコミットしました" in payload.get("text", "") for event, payload in events if event == "log")
+
 
 def test_handle_merge_outcome_logging(controller, event_recorder):
     events, _ = event_recorder
@@ -132,6 +162,26 @@ def test_handle_merge_outcome_logging(controller, event_recorder):
     )
     controller._handle_merge_outcome(delegate)
     assert any("Autoモード" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    merged = MergeOutcome(
+        strategy=OrchestratorMergeMode.AUTO,
+        status="merged",
+        branch="feature",
+        reason="host_pipeline",
+    )
+    controller._handle_merge_outcome(merged)
+    assert any("ホストパイプライン" in payload.get("text", "") for event, payload in events if event == "log")
+
+    events.clear()
+    fallback = MergeOutcome(
+        strategy=OrchestratorMergeMode.FULL_AUTO,
+        status="merged",
+        branch="feature",
+        reason="agent_fallback",
+    )
+    controller._handle_merge_outcome(fallback)
+    assert any("Full Auto" in payload.get("text", "") for event, payload in events if event == "log")
 
 
 def test_status_and_scoreboard_commands(controller, event_recorder):

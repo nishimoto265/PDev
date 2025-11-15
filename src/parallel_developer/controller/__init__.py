@@ -77,6 +77,7 @@ FLOW_MODE_LABELS = {
 MERGE_STRATEGY_LABELS = {
     MergeMode.MANUAL: "Manual",
     MergeMode.AUTO: "Auto",
+    MergeMode.FULL_AUTO: "Full Auto",
 }
 
 
@@ -509,7 +510,7 @@ class CLIController:
             ]
             for strategy in MergeMode:
                 lines.append(f"  {strategy.value:16s} : {self._merge_strategy_display(strategy)}")
-            lines.append("使い方: /merge [manual|auto]")
+            lines.append("使い方: /merge [manual|auto|full_auto]")
             self._emit(ControllerEventType.LOG, {"text": "\n".join(lines)})
             return
 
@@ -517,7 +518,7 @@ class CLIController:
         mapping = {strategy.value: strategy for strategy in MergeMode}
         new_strategy = mapping.get(token)
         if new_strategy is None:
-            self._emit(ControllerEventType.LOG, {"text": "使い方: /merge [manual|auto]"})
+            self._emit(ControllerEventType.LOG, {"text": "使い方: /merge [manual|auto|full_auto]"})
             return
         if new_strategy == getattr(self, "_merge_mode", MergeMode.MANUAL):
             self._emit(ControllerEventType.LOG, {"text": f"マージ戦略は既に {self._merge_strategy_display(new_strategy)} です。"})
@@ -709,8 +710,15 @@ class CLIController:
         try:
             repo = git.Repo(self._worktree_root)
         except git.exc.InvalidGitRepositoryError:
-            self._emit(ControllerEventType.LOG, {"text": "Gitリポジトリが存在しません。`git init` を実行してください。"})
-            return False
+            try:
+                Path(self._worktree_root).mkdir(parents=True, exist_ok=True)
+                repo = git.Repo.init(self._worktree_root)
+            except Exception as exc:  # noqa: BLE001
+                self._emit(
+                    ControllerEventType.LOG,
+                    {"text": f"Gitリポジトリを初期化できませんでした: {exc}"},
+                )
+                return False
 
         if not repo.is_dirty(untracked_files=True):
             if not quiet_when_no_change:
@@ -1297,6 +1305,15 @@ class CLIController:
                 {"text": f"[merge] 自動マージをスキップし、エージェントに委譲します ({label}).{detail}"},
             )
             self._emit_status("統合作業待ち")
+        elif status == "merged":
+            if reason_key == "host_pipeline":
+                message = f"[merge] Autoモード: {branch} をホストパイプラインで統合しました。"
+            elif reason_key == "agent_fallback":
+                message = f"[merge] Full Autoモード: エージェントの調整後に {branch} を統合しました。"
+            else:
+                message = f"[merge] {branch} の統合が完了しました。"
+            self._emit(ControllerEventType.LOG, {"text": message})
+            self._emit_status("統合作業完了")
         elif status == "failed":
             self._emit(
                 ControllerEventType.LOG,

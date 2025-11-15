@@ -25,6 +25,15 @@ class BossMode(str, Enum):
 class MergeMode(str, Enum):
     MANUAL = "manual"
     AUTO = "auto"
+    FULL_AUTO = "full_auto"
+
+
+class IntegrationError(RuntimeError):
+    """Raised when the host-side integration pipeline cannot proceed."""
+
+
+class MergeConflictError(IntegrationError):
+    """Raised when fast-forward integration into the host branch fails."""
 
 
 @dataclass(slots=True)
@@ -295,14 +304,19 @@ class Orchestrator:
 
             selected_info = self._validate_selection(decision, candidates)
             self._phase_log(f"候補 {selected_info.key} を採択しました。", status="マージ処理中")
-            if self._merge_mode == MergeMode.AUTO:
-                merge_outcome = self._auto_commit_and_finalize(
+            if self._merge_mode == MergeMode.MANUAL:
+                merge_outcome = self._finalize_selection(
+                    selected=selected_info,
+                    main_pane=layout.main_pane,
+                    outcome_status="delegate",
+                    delegate_reason="manual_user",
+                )
+            else:
+                merge_outcome = self._host_merge_pipeline(
                     selected=selected_info,
                     layout=layout,
                     signal_paths=signal_paths,
                 )
-            else:
-                merge_outcome = self._finalize_selection(selected=selected_info, main_pane=layout.main_pane)
             artifact.selected_session_id = selected_info.session_id
 
             result = OrchestrationResult(
@@ -677,19 +691,22 @@ class Orchestrator:
         *,
         selected: CandidateInfo,
         main_pane: str,
+        outcome_status: Literal["skipped", "merged", "delegate", "failed"] = "delegate",
         delegate_reason: Optional[str] = None,
+        error: Optional[str] = None,
     ) -> MergeOutcome:
         self._tmux.interrupt_pane(pane_id=main_pane)
         reason = delegate_reason
-        if reason is None:
-            if self._merge_mode == MergeMode.AUTO:
-                reason = "agent_auto"
-            else:
+        if outcome_status == "delegate" and reason is None:
+            if self._merge_mode == MergeMode.MANUAL:
                 reason = "manual_user"
+            elif self._merge_mode in {MergeMode.AUTO, MergeMode.FULL_AUTO}:
+                reason = "agent_auto"
         merge_outcome = MergeOutcome(
             strategy=self._merge_mode,
-            status="delegate",
+            status=outcome_status,
             branch=selected.branch,
+            error=error,
             reason=reason,
         )
         if selected.session_id:
@@ -709,44 +726,203 @@ class Orchestrator:
                 pass
         return merge_outcome
 
-    def _auto_commit_and_finalize(
+    def _host_merge_pipeline(
         self,
         *,
         selected: CandidateInfo,
         layout: CycleLayout,
         signal_paths: Optional[SignalPaths],
     ) -> MergeOutcome:
-        pane_id = selected.pane_id or self._resolve_candidate_pane(selected.key, layout)
-        if pane_id is None:
+        try:
+            self._run_host_pipeline(selected)
+        except MergeConflictError as exc:
+            if self._merge_mode == MergeMode.FULL_AUTO:
+                return self._delegate_branch_fix_and_retry(
+                    selected=selected,
+                    layout=layout,
+                    signal_paths=signal_paths,
+                    failure_reason=str(exc),
+                )
             return self._finalize_selection(
                 selected=selected,
                 main_pane=layout.main_pane,
-                delegate_reason="manual_user",
+                outcome_status="failed",
+                error=str(exc),
+            )
+        except IntegrationError as exc:
+            return self._finalize_selection(
+                selected=selected,
+                main_pane=layout.main_pane,
+                outcome_status="failed",
+                error=str(exc),
             )
 
-        flag_path = self._resolve_flag_path(selected.key, signal_paths)
-        if flag_path:
-            try:
-                flag_path.unlink()
-            except FileNotFoundError:
-                pass
-
-        instruction = self._build_agent_commit_instruction(selected, flag_path)
-        self._phase_log("採択エージェントへコミット/統合手順を送信しました。", status="コミット指示中")
-        self._tmux.prepare_for_instruction(pane_id=pane_id)
-        self._tmux.send_instruction_to_pane(pane_id=pane_id, instruction=instruction)
-
-        if flag_path:
-            self._phase_log("コミット結果を待っています。", status="コミット待ち")
-            self._wait_for_flag(flag_path)
-
-        self._phase_log("コミット報告を受け取りました。", status="マージ処理中")
-        self._pull_main_after_auto()
         return self._finalize_selection(
             selected=selected,
             main_pane=layout.main_pane,
-            delegate_reason="agent_auto",
+            outcome_status="merged",
+            delegate_reason="host_pipeline",
         )
+
+    def _run_host_pipeline(self, selected: CandidateInfo) -> None:
+        branch = selected.branch
+        self._phase_log("ホストパイプライン: 変更をステージングしています。", status="マージ処理中")
+        committed = self._stage_and_commit(selected)
+        if committed:
+            self._phase_log("ホストパイプライン: コミットを作成しました。", status="マージ処理中")
+        else:
+            self._phase_log("ホストパイプライン: 新しいコミットは不要でした。", status="マージ処理中")
+        target_branch = self._current_root_branch()
+        self._phase_log(
+            f"ホストパイプライン: {branch} を {target_branch} へ統合します。",
+            status="マージ処理中",
+        )
+        self._merge_branch_into_root(branch)
+        self._phase_log("ホストパイプライン: 統合が完了しました。", status="マージ処理中")
+
+    def _stage_and_commit(self, selected: CandidateInfo) -> bool:
+        worktree = selected.worktree
+        self._run_git(worktree, "add", "-A")
+        diff = self._run_git(worktree, "diff", "--cached", "--quiet", check=False)
+        if diff.returncode == 0:
+            return False
+        if diff.returncode not in (0, 1):
+            raise IntegrationError(
+                f"git diff --cached --quiet failed in {worktree}: {diff.stderr or diff.stdout or 'no output'}"
+            )
+        commit_message = f"Auto update from {selected.key}"
+        self._run_git(worktree, "commit", "-m", commit_message)
+        return True
+
+    def _merge_branch_into_root(self, branch: str) -> None:
+        root = self._root_path()
+        result = subprocess.run(
+            ["git", "-C", str(root), "merge", "--ff-only", branch],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "merge failed"
+            raise MergeConflictError(f"git merge --ff-only {branch} が失敗しました: {detail}")
+
+    def _root_path(self) -> Path:
+        root = getattr(self._worktree, "root", None)
+        if root is None:
+            raise IntegrationError("プロジェクトルートへのパスを解決できませんでした。")
+        return Path(root)
+
+    def _current_root_branch(self) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self._root_path()), "rev-parse", "--abbrev-ref", "HEAD"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, IntegrationError):
+            return "main"
+        name = result.stdout.strip()
+        return name or "main"
+
+    def _run_git(self, cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        cmd = ["git", "-C", str(cwd), *args]
+        completed = subprocess.run(cmd, capture_output=True, text=True)
+        if check and completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
+            raise IntegrationError(f"{' '.join(cmd)} が失敗しました: {detail}")
+        return completed
+
+    def _delegate_branch_fix_and_retry(
+        self,
+        *,
+        selected: CandidateInfo,
+        layout: CycleLayout,
+        signal_paths: Optional[SignalPaths],
+        failure_reason: str,
+    ) -> MergeOutcome:
+        pane_id = selected.pane_id or self._resolve_candidate_pane(selected.key, layout)
+        flag_path = self._resolve_flag_path(selected.key, signal_paths) if signal_paths else None
+        if pane_id is None or flag_path is None:
+            return self._finalize_selection(
+                selected=selected,
+                main_pane=layout.main_pane,
+                outcome_status="failed",
+                error=failure_reason,
+            )
+        try:
+            flag_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        instruction = self._build_agent_fix_instruction(selected, flag_path, failure_reason)
+        self._phase_log("ホストパイプラインに失敗したため、エージェントへブランチ調整を依頼します。", status="統合作業待ち")
+        self._tmux.prepare_for_instruction(pane_id=pane_id)
+        self._tmux.send_instruction_to_pane(pane_id=pane_id, instruction=instruction)
+
+        self._phase_log("エージェントの完了シグナルを待っています。", status="コミット待ち")
+        self._wait_for_flag(flag_path)
+        self._phase_log("エージェントの修正が完了しました。再度統合を試みます。", status="マージ処理中")
+        try:
+            self._run_host_pipeline(selected)
+        except MergeConflictError as exc:
+            return self._finalize_selection(
+                selected=selected,
+                main_pane=layout.main_pane,
+                outcome_status="failed",
+                error=str(exc),
+            )
+        except IntegrationError as exc:
+            return self._finalize_selection(
+                selected=selected,
+                main_pane=layout.main_pane,
+                outcome_status="failed",
+                error=str(exc),
+            )
+
+        return self._finalize_selection(
+            selected=selected,
+            main_pane=layout.main_pane,
+            outcome_status="merged",
+            delegate_reason="agent_fallback",
+        )
+
+    def _build_agent_fix_instruction(
+        self,
+        selected: CandidateInfo,
+        flag_path: Path,
+        failure_reason: str,
+    ) -> str:
+        worktree = str(selected.worktree)
+        branch = selected.branch
+        root = str(self._root_path())
+        flag_text = str(flag_path)
+        target = self._current_root_branch()
+
+        lines = [
+            "追加タスク: ホストの自動統合が fast-forward できなかったため、ブランチを整理してください。",
+            f"- 失敗理由: {failure_reason}",
+            f"- 作業ディレクトリ: {worktree}",
+            f"- 調整対象ブランチ: {branch}",
+            f"- ホスト側ブランチ: {target}",
+        ]
+        lines += [
+            "",
+            "【目的】",
+            f"- {branch} が {target} に fast-forward できる状態になるよう main 側の変更を取り込む",
+            "- 必要なコンフリクト解消や修正をコミットしてホストへ知らせる",
+            "",
+            "【推奨フロー】",
+            f"1. cd {worktree} && git status -sb で差分を確認",
+            f"2. git merge {target} もしくは git rebase {target} で最新コミットを取り込む",
+            "3. コンフリクトが出たら編集→ git add -A → git commit で解消結果を記録",
+            "4. テストや動作確認を行い、必要に応じて追加修正をコミット",
+            "5. ブランチが整ったらホストにシグナルを渡す",
+        ]
+        lines.append(f"6. 完了したら `touch {flag_text}` を実行してください。ホストが再度統合します。")
+        lines.append("※ 追加の手順が必要な場合はログに残してください。")
+        return "\n".join(lines)
 
     def _resolve_candidate_pane(self, key: str, layout: CycleLayout) -> Optional[str]:
         if key == "boss":
@@ -795,81 +971,9 @@ class Orchestrator:
         lines.append("※ 進め方に迷った場合やエラーが発生した場合は状況とログを共有してください。")
         return "\n".join(lines)
 
-    def _pull_main_after_auto(self) -> None:
-        root = getattr(self._worktree, "root", None)
-        if not root:
-            return
-        ff_cmd = ["git", "-C", str(root), "pull", "--ff-only"]
-        try:
-            subprocess.run(
-                ff_cmd,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self._log_merge_sync("git pull --ff-only")
-            return
-        except subprocess.CalledProcessError as exc:  # noqa: PERF203
-            self._log_git_failure("git pull --ff-only", exc)
-
-        remote, branch = self._resolve_upstream_tracking(root)
-        rebase_cmd = ["git", "-C", str(root), "pull", "--rebase", remote, branch]
-        try:
-            subprocess.run(
-                rebase_cmd,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self._log_merge_sync(f"git pull --rebase {remote} {branch}")
-            return
-        except subprocess.CalledProcessError as exc:  # noqa: PERF203
-            conflict_msg = (
-                "[merge] ホスト側 git pull --rebase {remote} {branch} が失敗しました: {detail}. "
-                "衝突を解消し `git rebase --continue` したら /done で次へ進めてください。"
-            ).format(remote=remote, branch=branch, detail=exc.stderr or exc.stdout or str(exc))
-            if self._log_hook:
-                try:
-                    self._log_hook(conflict_msg)
-                except Exception:
-                    pass
-
-    def _resolve_upstream_tracking(self, root: Path) -> tuple[str, str]:
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            upstream = result.stdout.strip()
-            if upstream and "/" in upstream:
-                remote, branch = upstream.split("/", 1)
-                return remote, branch
-        except subprocess.CalledProcessError:
-            pass
-        return "origin", "main"
-
-    def _log_git_failure(self, action: str, exc: subprocess.CalledProcessError) -> None:
-        if not self._log_hook:
-            return
-        message = f"[merge] ホスト側 {action} が失敗しました: {exc.stderr or exc.stdout or exc}"
-        try:
-            self._log_hook(message)
-        except Exception:
-            pass
-
-    def _log_merge_sync(self, action: str) -> None:
-        if not self._log_hook:
-            return
-        message = f"[merge] ホスト側 {action} で main を同期しました。"
-        try:
-            self._log_hook(message)
-        except Exception:
-            pass
+    def _pull_main_after_auto(self) -> None:  # pragma: no cover (legacy compatibility)
+        """Remnant hook for older logs; kept to avoid AttributeError if referenced."""
+        return
 
     def _wait_for_flag(self, flag_path: Path, timeout: float = 600.0) -> None:
         poll = getattr(self._monitor, "poll_interval", 0.05)
